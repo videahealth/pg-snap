@@ -1,5 +1,7 @@
 # pg-snap
 
+Tool to take database snapshots and restore them
+
 ## Getting Started
 
 ### Command
