@@ -3,3 +3,4 @@ node_modules
 fake-data
 data-dump
 data
+.DS_Store
