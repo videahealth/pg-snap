@@ -12,7 +12,6 @@ mod structs;
 mod utils;
 #[macro_use]
 extern crate simple_log;
-extern crate petgraph;
 
 // float8, uuid, json
 
