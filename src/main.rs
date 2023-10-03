@@ -43,6 +43,7 @@ async fn main() -> Result<(), Error> {
                 args.common.db,
                 args.common.password,
                 args.skip_tables,
+                args.common.concurrency,
             )
             .await
             {
@@ -57,6 +58,7 @@ async fn main() -> Result<(), Error> {
                 args.common.username,
                 args.common.db,
                 args.common.password,
+                args.common.concurrency,
             )
             .await;
         }

@@ -10,14 +10,6 @@ pub fn parse_skip_tables(arg: &str) -> HashSet<String> {
     arg.split(',').map(String::from).collect()
 }
 
-pub fn parse_skip_schemas(arg: &str) -> HashSet<String> {
-    arg.split(',')
-        .filter(|s| s.ends_with(".*"))
-        .filter_map(|s| s.split('.').next())
-        .map(String::from)
-        .collect()
-}
-
 pub fn should_skip(table_schema: &str, table_name: &str, skip_tables: &HashSet<String>) -> bool {
     let full_name = format!("{}.{}", table_schema, table_name);
     let schema_wildcard = format!("{}.*", table_schema);

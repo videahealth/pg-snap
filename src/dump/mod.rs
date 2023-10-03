@@ -2,8 +2,8 @@ use crate::{
     db::Db,
     structs::{PgTable, TableColumns},
     utils::{
-        create_and_canonicalize_path, extract_and_remove_fk_constraints, parse_skip_schemas,
-        parse_skip_tables, should_skip,
+        create_and_canonicalize_path, extract_and_remove_fk_constraints, parse_skip_tables,
+        should_skip,
     },
 };
 use futures::StreamExt;
@@ -28,6 +28,7 @@ pub async fn dump_db(
     db: String,
     pw: String,
     skip_tables_str: Option<String>,
+    concurrency: Option<usize>,
 ) -> Result<(), Error> {
     let pg = Db::connect(host.clone(), user.clone(), db.clone(), pw.clone())
         .await
@@ -37,10 +38,9 @@ pub async fn dump_db(
         Some(tbls) => parse_skip_tables(&tbls),
         None => HashSet::new(),
     };
-    let skip_schemas = match skip_tables_str {
-        Some(schem) => parse_skip_schemas(&schem),
-        None => HashSet::new(),
-    };
+
+    let max_workers = concurrency.unwrap_or(5);
+    info!("Running with concurrency of {}", max_workers);
 
     // Now we can execute a simple statement that just returns its parameter.
     let query_rows = pg.client
@@ -54,7 +54,6 @@ pub async fn dump_db(
             let table_name: &str = r.get(1);
 
             if should_skip(table_schema, table_name, &skip_tables) {
-                info!("Skipping table {table_schema}.{table_name}");
                 false
             } else {
                 true
@@ -66,14 +65,14 @@ pub async fn dump_db(
     let base_dir_path: &Path = base_dir.as_ref();
     fs::create_dir_all(base_dir.clone()).expect("Error creating directory");
 
-    const MAX_WORKERS: usize = 5;
     let mut join_set: JoinSet<Result<Result<(), Box<dyn std::error::Error + Send>>, JoinError>> =
         JoinSet::new();
 
     let table_map = Arc::new(Mutex::new(HashMap::new()));
 
+    info!("Introspecting and taking a snapshot");
     for table in rows {
-        while join_set.len() >= MAX_WORKERS {
+        while join_set.len() >= max_workers {
             let _ = join_set.join_next().await.unwrap().unwrap();
         }
 
@@ -93,9 +92,6 @@ pub async fn dump_db(
             let table_schema: &str = table.get(0);
             let table_name: &str = table.get(1);
 
-            info!("Dumping table {table_schema}.{table_name}");
-
-            // Fetch column details for each table
             let columns = pg_db
                 .get_table_details(table_name)
                 .await
@@ -107,12 +103,6 @@ pub async fn dump_db(
 
             let data_path = table_path.join("data.csv");
             let table_data_path = table_path.join("table.bin");
-
-            info!(
-                "Fetching data from postgres {}.{}",
-                table_schema, table_name
-            );
-            info!("Writing out results {}.{}", table_schema, table_name);
 
             if let Err(e) = write_rows_to_csv(&client, &data_path, table_name, table_schema).await {
                 fs::remove_dir_all(&table_path).expect("Failed to delete directory");
@@ -133,6 +123,8 @@ pub async fn dump_db(
             let mut map = table_map_clone.lock().await;
             map.insert(format!("{table_schema}.{table_name}"), pg_table);
 
+            info!("Wrote out results for {}.{}", table_schema, table_name);
+
             Ok::<(), Box<dyn std::error::Error + Send>>(())
         });
 
@@ -146,19 +138,8 @@ pub async fn dump_db(
         }
     }
 
-    let skip_tables_vec = skip_tables.into_iter().collect();
-    let skip_schemas_vec = skip_schemas.into_iter().collect();
-
-    let res = dump_schema_to_file(
-        &user,
-        &pw,
-        &host,
-        5432,
-        &db,
-        skip_tables_vec,
-        skip_schemas_vec,
-    )
-    .expect("Error writing sql file");
+    info!("Using pg_dump to extract database DDL");
+    let res = dump_schema_to_file(&user, &pw, &host, 5432, &db).expect("Error writing sql file");
 
     let fk_content_path = base_dir_path.join("fk_constraints.sql");
     let ddl_content_path = base_dir_path.join("ddl.sql");
@@ -221,8 +202,6 @@ pub fn dump_schema_to_file(
     host: &str,
     port: u16,
     dbname: &str,
-    exclude_tables: Vec<String>,
-    exclude_schemas: Vec<String>,
 ) -> std::io::Result<String> {
     // Create and configure the pg_dump command
     let mut command = Command::new("pg_dump");
@@ -237,14 +216,6 @@ pub fn dump_schema_to_file(
         .arg("-d")
         .arg(dbname)
         .arg("--schema-only");
-
-    for table in exclude_tables {
-        command.arg("-T").arg(table);
-    }
-
-    for schema in exclude_schemas {
-        command.arg("--exclude-schema").arg(schema);
-    }
 
     let output = command
         .output()

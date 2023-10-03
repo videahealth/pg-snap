@@ -16,6 +16,9 @@ pub struct CommonArgs {
 
     #[clap(short = 'D', long)]
     pub debug: bool,
+
+    #[clap(short, long)]
+    pub concurrency: Option<usize>,
 }
 
 #[derive(Parser, Debug)]

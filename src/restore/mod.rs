@@ -3,16 +3,26 @@ use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tokio::fs;
+use tokio::task::{JoinError, JoinSet};
+use tokio::{fs, task};
 
 use crate::db::recreate_database;
 use crate::structs::PgTable;
 use crate::utils::ask_for_confirmation;
 use std::io::BufRead;
 
-pub async fn restore_db(host: String, user: String, db: String, pw: String) {
+pub async fn restore_db(
+    host: String,
+    user: String,
+    db: String,
+    pw: String,
+    concurrency: Option<usize>,
+) {
     let base_dir = Path::new("./data-dump");
     let tables = load_pg_tables(base_dir).await;
+
+    let max_workers = concurrency.unwrap_or(3);
+    info!("Running with concurrency of {}", max_workers);
 
     let conf_string =
         format!("Warning! this operation will drop the database {db}, do you wish to continue?");
@@ -30,22 +40,45 @@ pub async fn restore_db(host: String, user: String, db: String, pw: String) {
         Ok(_) => info!("Executed DDL"),
     };
 
+    let mut join_set: JoinSet<Result<(), JoinError>> = JoinSet::new();
+
+    info!("Uploading snapshot and applying DDL");
     for tbl in tables {
-        if let Err(e) = read_from_file_and_write_to_db(
-            &tbl.data_file,
-            &tbl.name,
-            &tbl.schema,
-            &db,
-            &user,
-            &pw,
-            &host,
-        )
-        .await
-        {
-            warn!(
-                "Error copying data for table: {}.{}: {}",
-                tbl.name, tbl.schema, e
+        let host_clone = host.clone();
+        let user_clone = user.clone();
+        let db_clone = db.clone();
+        let pw_clone = pw.clone();
+
+        while join_set.len() >= max_workers {
+            let _ = join_set.join_next().await.unwrap().unwrap();
+        }
+
+        let handle = task::spawn(async move {
+            if let Err(e) = read_from_file_and_write_to_db(
+                &tbl.data_file,
+                &tbl.name,
+                &tbl.schema,
+                &db_clone,
+                &user_clone,
+                &pw_clone,
+                &host_clone,
             )
+            .await
+            {
+                warn!(
+                    "Error copying data for table: {}.{}: {}",
+                    tbl.name, tbl.schema, e
+                )
+            }
+        });
+
+        join_set.spawn(handle);
+    }
+
+    while let Some(output) = join_set.join_next().await {
+        match output.expect("Error in worker") {
+            Err(e) => eprintln!("Error in worker: {e}"),
+            Ok(_) => (),
         }
     }
 
@@ -143,7 +176,12 @@ async fn read_from_file_and_write_to_db(
 
     if output.status.success() {
         if !output.stdout.is_empty() {
-            info!("Output: {}", String::from_utf8_lossy(&output.stdout));
+            info!(
+                "{}.{}: {}",
+                table_name,
+                table_schema,
+                String::from_utf8_lossy(&output.stdout)
+            );
         }
     } else {
         if !output.stderr.is_empty() {
