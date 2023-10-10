@@ -5,8 +5,9 @@ use std::process::Command;
 
 use tokio::task::{JoinError, JoinSet};
 use tokio::{fs, task};
+use tokio_postgres::Error;
 
-use crate::db::recreate_database;
+use crate::db::{recreate_database, Db};
 use crate::structs::PgTable;
 use crate::utils::ask_for_confirmation;
 use std::io::BufRead;
@@ -88,6 +89,14 @@ pub async fn restore_db(
         Err(e) => warn!("Error executing FK constraints: {}", e),
         Ok(_) => info!("Executed FK constraints"),
     };
+
+    let db_conn = Db::connect(host.clone(), user.clone(), db.clone(), pw.clone())
+        .await
+        .expect("Unable to connect to db");
+    match write_seq(&db_conn).await {
+        Err(e) => warn!("Error executing SEQ updates: {}", e),
+        Ok(_) => info!("Executed SEQ updates"),
+    }
 }
 
 async fn load_pg_tables(dir_path: &Path) -> Vec<PgTable> {
@@ -220,6 +229,38 @@ async fn execute_ddl_file(
     if !output.stderr.is_empty() {
         warn!("Error: {}", String::from_utf8_lossy(&output.stderr));
     }
+
+    Ok(())
+}
+
+async fn write_seq(db: &Db) -> Result<(), Error> {
+    db.client.execute("
+    with sequences as (select *
+            from (select table_schema,
+                        table_name,
+                        column_name,
+                        pg_get_serial_sequence(format('%I.%I', table_schema, table_name),
+                                                column_name) as col_sequence
+                from information_schema.columns
+                where table_schema not in ('pg_catalog', 'information_schema')) t
+            where col_sequence is not null),
+    maxvals as (select table_schema,
+                table_name,
+                column_name,
+                col_sequence,
+                (xpath('/row/max/text()',
+                        query_to_xml(format('select max(%I) from %I.%I', column_name, table_schema, table_name),
+                                    true, true, ''))
+                    )[1]::text::bigint as max_val
+        from sequences)
+    select table_schema,
+    table_name,
+    column_name,
+    col_sequence,
+    coalesce(max_val, 0) as max_val,
+    setval(col_sequence, coalesce(max_val, 1)) --<< this will change the sequence
+    from maxvals;
+    ", &[]).await?;
 
     Ok(())
 }
