@@ -1,15 +1,18 @@
+use std::collections::HashSet;
 use std::fs::File;
-use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tokio::task::{JoinError, JoinSet};
 use tokio::{fs, task};
-use tokio_postgres::Error;
+use tokio_postgres::Row;
 
 use crate::db::{recreate_database, Db};
 use crate::structs::PgTable;
 use crate::utils::ask_for_confirmation;
+use anyhow::{anyhow, Error, Result};
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use std::io::BufRead;
 
 pub async fn restore_db(
@@ -21,6 +24,18 @@ pub async fn restore_db(
 ) {
     let base_dir = Path::new("./data-dump");
     let tables = load_pg_tables(base_dir).await;
+
+    let db_conn = Db::connect(host.clone(), user.clone(), db.clone(), pw.clone())
+        .await
+        .expect("Unable to connect to db");
+
+    let ext_tables = get_tables_from_extensions(&db_conn)
+        .await
+        .expect("Error getting table extensions");
+    let ext_tables_set: HashSet<String> = ext_tables
+        .into_iter()
+        .map(|v| format!("{}.{}", v.schema_name, v.table_name))
+        .collect();
 
     let max_workers = concurrency.unwrap_or(3);
     info!("Running with concurrency of {}", max_workers);
@@ -49,6 +64,7 @@ pub async fn restore_db(
         let user_clone = user.clone();
         let db_clone = db.clone();
         let pw_clone = pw.clone();
+        let ext_tables_set_clone = ext_tables_set.clone();
 
         while join_set.len() >= max_workers {
             let _ = join_set.join_next().await.unwrap().unwrap();
@@ -63,6 +79,7 @@ pub async fn restore_db(
                 &user_clone,
                 &pw_clone,
                 &host_clone,
+                &ext_tables_set_clone,
             )
             .await
             {
@@ -90,9 +107,6 @@ pub async fn restore_db(
         Ok(_) => info!("Executed FK constraints"),
     };
 
-    let db_conn = Db::connect(host.clone(), user.clone(), db.clone(), pw.clone())
-        .await
-        .expect("Unable to connect to db");
     match write_seq(&db_conn).await {
         Err(e) => warn!("Error executing SEQ updates: {}", e),
         Ok(_) => info!("Executed SEQ updates"),
@@ -130,7 +144,7 @@ async fn load_pg_tables(dir_path: &Path) -> Vec<PgTable> {
     pg_tables
 }
 
-fn read_first_line(path: PathBuf) -> io::Result<String> {
+fn read_first_line(path: PathBuf) -> Result<String> {
     let file = File::open(path)?;
     let reader = std::io::BufReader::new(file);
     let mut lines = reader.lines();
@@ -142,10 +156,7 @@ fn read_first_line(path: PathBuf) -> io::Result<String> {
                 .collect();
             Ok(quoted.join(","))
         }
-        None => Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "File was empty",
-        )),
+        None => Err(anyhow!("File was empty")),
     }
 }
 
@@ -157,19 +168,48 @@ async fn read_from_file_and_write_to_db(
     username: &str,
     password: &str,
     host: &str,
-) -> io::Result<()> {
+    ext_tables: &HashSet<String>,
+) -> Result<()> {
     let full_path: PathBuf = path.canonicalize()?;
     let full_path_clone = full_path.clone();
     let full_path_str = full_path_clone
         .to_str()
         .expect("Failed to convert PathBuf to str");
 
+    let full_table_name = format!("{}.{}", table_schema, table_name);
+
+    let mut table_to_copy = table_name.to_owned();
+    let mut schema_to_copy: Option<String> = Some(table_schema.to_owned());
+
+    let mut is_tmp_table = false;
+
+    if ext_tables.contains(&full_table_name) {
+        let db = Db::connect(
+            host.to_string(),
+            username.to_string(),
+            dbname.to_string(),
+            password.to_string(),
+        )
+        .await
+        .expect("Unable to connect to db");
+        let tmp_table = create_temp_table(&db, table_to_copy.as_str(), table_schema).await?;
+        table_to_copy = tmp_table;
+        schema_to_copy = None;
+        is_tmp_table = true;
+    }
+
     let first_line = read_first_line(full_path).expect("Failed to read the first line");
 
-    let copy_cmd = format!(
-        "\\copy \"{}\".\"{}\"({}) FROM '{}' WITH CSV HEADER DELIMITER ','",
-        table_schema, table_name, first_line, full_path_str
-    );
+    let copy_cmd = match schema_to_copy {
+        Some(schema) => format!(
+            "\\copy \"{}\".\"{}\"({}) FROM '{}' WITH CSV HEADER DELIMITER ','",
+            schema, table_to_copy, first_line, full_path_str
+        ),
+        None => format!(
+            "\\copy \"{}\"({}) FROM '{}' WITH CSV HEADER DELIMITER ','",
+            table_to_copy, first_line, full_path_str
+        ),
+    };
 
     let output = Command::new("psql")
         .env("PGPASSWORD", password)
@@ -192,6 +232,22 @@ async fn read_from_file_and_write_to_db(
                 String::from_utf8_lossy(&output.stdout)
             );
         }
+
+        if is_tmp_table {
+            let db = Db::connect(
+                host.to_string(),
+                username.to_string(),
+                dbname.to_string(),
+                password.to_string(),
+            )
+            .await?;
+            copy_from_tmp_table(
+                &db,
+                format!("\"{}\".\"{}\"", table_schema, table_to_copy).as_str(),
+                format!("\"{}\"", table_to_copy).as_str(),
+            )
+            .await?;
+        }
     } else {
         if !output.stderr.is_empty() {
             warn!("Error: {}", String::from_utf8_lossy(&output.stderr));
@@ -207,7 +263,7 @@ async fn execute_ddl_file(
     password: &str,
     host: &str,
     path: &PathBuf,
-) -> io::Result<()> {
+) -> Result<()> {
     let full_path: PathBuf = path.canonicalize()?;
     let full_path_clone = full_path.clone();
     let full_path_str = full_path_clone
@@ -263,4 +319,96 @@ async fn write_seq(db: &Db) -> Result<(), Error> {
     ", &[]).await?;
 
     Ok(())
+}
+
+fn rnd_string() -> String {
+    thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(|x| x as char)
+        .collect()
+}
+
+async fn create_temp_table(db: &Db, table_name: &str, table_schema: &str) -> Result<String, Error> {
+    let tmp_table_name = format!("{}_{}", table_name, rnd_string());
+
+    let stmnt = format!(
+        "
+    CREATE TABLE \"{}\"
+    AS
+    SELECT * 
+    FROM \"{}\".\"{}\"
+    WITH NO DATA;
+    ",
+        tmp_table_name, table_schema, table_name
+    );
+
+    db.client.execute(stmnt.as_str(), &[]).await?;
+
+    Ok(tmp_table_name)
+}
+
+async fn copy_from_tmp_table(db: &Db, main_table: &str, tmp_table: &str) -> Result<(), Error> {
+    let stmnt = format!(
+        "
+        INSERT INTO {}
+        SELECT *
+        FROM {}
+        ON CONFLICT DO NOTHING
+    ",
+        main_table, tmp_table
+    );
+
+    db.client.execute(stmnt.as_str(), &[]).await?;
+    db.client
+        .execute(format!("DROP TABLE {}", tmp_table).as_str(), &[])
+        .await?;
+
+    Ok(())
+}
+
+struct ExtTables {
+    table_name: String,
+    schema_name: String,
+}
+
+impl ExtTables {
+    pub fn from_cols(columns: &Vec<Row>) -> Vec<ExtTables> {
+        let mut table_cols = vec![];
+
+        for column in columns {
+            let table_name: &str = column.get(0);
+            let schema_name: &str = column.get(1);
+
+            table_cols.push(ExtTables {
+                table_name: table_name.to_string(),
+                schema_name: schema_name.to_string(),
+            });
+        }
+
+        table_cols
+    }
+}
+
+async fn get_tables_from_extensions(db: &Db) -> Result<Vec<ExtTables>> {
+    let columns = db
+        .client
+        .query(
+            "
+    SELECT
+    cl.relname AS table_name,
+    ns.nspname AS schema_name,
+    ext.extname AS extension_name
+  FROM pg_class cl
+  JOIN pg_namespace ns ON cl.relnamespace = ns.oid
+  JOIN pg_depend dep ON dep.objid = cl.oid
+  JOIN pg_extension ext ON dep.refobjid = ext.oid
+  WHERE cl.relkind = 'r'
+    AND ns.nspname NOT IN ('pg_catalog', 'information_schema');  
+    ",
+            &[],
+        )
+        .await?;
+
+    Ok(ExtTables::from_cols(&columns))
 }
