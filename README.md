@@ -12,7 +12,7 @@ Available binaries:
 - `pg-snap-x86_64-apple-darwin` (Mac Intel)
 
 ```bash
-sudo curl -L -o /usr/local/bin/pg_snap https://github.com/videahealth/pg-snap/releases/download/v0.3.0/<binary>
+sudo curl -L -o /usr/local/bin/pg_snap https://github.com/videahealth/pg-snap/releases/download/v0.4.0/<binary>
 sudo chmod +x /usr/local/bin/pg_snap
 
 # In a new shell session
