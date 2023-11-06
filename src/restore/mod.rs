@@ -25,11 +25,7 @@ pub async fn restore_db(
     let base_dir = Path::new("./data-dump");
     let tables = load_pg_tables(base_dir).await;
 
-    let db_conn = Db::connect(host.clone(), user.clone(), db.clone(), pw.clone())
-        .await
-        .expect("Unable to connect to db");
-
-    let ext_tables = get_tables_from_extensions(&db_conn)
+    let ext_tables = get_tables_from_extensions(&db, &user, &pw, &host)
         .await
         .expect("Error getting table extensions");
     let ext_tables_set: HashSet<String> = ext_tables
@@ -107,7 +103,7 @@ pub async fn restore_db(
         Ok(_) => info!("Executed FK constraints"),
     };
 
-    match write_seq(&db_conn).await {
+    match write_seq(&db, &user, &pw, &host).await {
         Err(e) => warn!("Error executing SEQ updates: {}", e),
         Ok(_) => info!("Executed SEQ updates"),
     }
@@ -227,8 +223,8 @@ async fn read_from_file_and_write_to_db(
         if !output.stdout.is_empty() {
             info!(
                 "{}.{}: {}",
-                table_name,
                 table_schema,
+                table_name,
                 String::from_utf8_lossy(&output.stdout)
             );
         }
@@ -289,7 +285,16 @@ async fn execute_ddl_file(
     Ok(())
 }
 
-async fn write_seq(db: &Db) -> Result<(), Error> {
+async fn write_seq(dbname: &str, username: &str, password: &str, host: &str) -> Result<(), Error> {
+    let db = Db::connect(
+        host.to_string(),
+        username.to_string(),
+        dbname.to_string(),
+        password.to_string(),
+    )
+    .await
+    .expect("Unable to connect to db");
+
     db.client.execute("
     with sequences as (select *
             from (select table_schema,
@@ -390,7 +395,21 @@ impl ExtTables {
     }
 }
 
-async fn get_tables_from_extensions(db: &Db) -> Result<Vec<ExtTables>> {
+async fn get_tables_from_extensions(
+    dbname: &str,
+    username: &str,
+    password: &str,
+    host: &str,
+) -> Result<Vec<ExtTables>> {
+    let db = Db::connect(
+        host.to_string(),
+        username.to_string(),
+        dbname.to_string(),
+        password.to_string(),
+    )
+    .await
+    .expect("Unable to connect to db");
+
     let columns = db
         .client
         .query(
