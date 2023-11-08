@@ -1,10 +1,9 @@
+use anyhow::anyhow;
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
+use std::io::BufRead;
 use std::io::Write;
-use std::{
-    collections::HashSet,
-    fs::{self, File},
-    io,
-    path::PathBuf,
-};
+use std::{collections::HashSet, fs::File, io, path::PathBuf};
 
 pub fn parse_skip_tables(arg: &str) -> HashSet<String> {
     arg.split(',').map(String::from).collect()
@@ -44,20 +43,6 @@ mod tests {
         // Check non-matching prefix
         assert_eq!(should_skip("test", "NotEventsTable", &skip_tables), false);
     }
-}
-
-pub fn create_and_canonicalize_path(path: &PathBuf) -> io::Result<PathBuf> {
-    // Check if the path exists
-    if !path.exists() {
-        if path.extension().is_some() {
-            File::create(&path)?;
-        } else {
-            fs::create_dir_all(&path)?;
-        }
-    }
-
-    // Canonicalize the path and return
-    path.canonicalize()
 }
 
 pub fn extract_and_remove_fk_constraints(input: String) -> std::io::Result<(String, String)> {
@@ -109,5 +94,29 @@ pub fn ask_for_confirmation(prompt: &str) {
             println!("Invalid input. Please enter 'y' for yes or 'n' for no.");
             ask_for_confirmation(prompt);
         }
+    }
+}
+
+pub fn rnd_string() -> String {
+    thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(|x| x as char)
+        .collect()
+}
+
+pub fn read_first_line(path: &PathBuf) -> anyhow::Result<String> {
+    let file = File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut lines = reader.lines();
+    match lines.next() {
+        Some(line) => {
+            let quoted: Vec<String> = line?
+                .split(',')
+                .map(|column| format!("\"{}\"", column))
+                .collect();
+            Ok(quoted.join(","))
+        }
+        None => Err(anyhow!("File was empty")),
     }
 }

@@ -1,26 +1,11 @@
 use crate::{
     db::Db,
-    structs::{PgTable, TableColumns},
-    utils::{
-        create_and_canonicalize_path, extract_and_remove_fk_constraints, parse_skip_tables,
-        should_skip,
-    },
+    structs::PgTable,
+    table::Table,
+    utils::{extract_and_remove_fk_constraints, parse_skip_tables, should_skip},
 };
-use futures::StreamExt;
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
-use tokio::{
-    fs::File,
-    io::AsyncWriteExt,
-    sync::Mutex,
-    task::{self, JoinError, JoinSet},
-};
-use tokio_postgres::{Client, Error, Row};
+use std::{collections::HashSet, fs, path::Path, process::Command};
+use tokio::task::{self, JoinError, JoinSet};
 
 pub async fn dump_db(
     host: String,
@@ -29,10 +14,8 @@ pub async fn dump_db(
     pw: String,
     skip_tables_str: Option<String>,
     concurrency: Option<usize>,
-) -> Result<(), Error> {
-    let pg = Db::connect(host.clone(), user.clone(), db.clone(), pw.clone())
-        .await
-        .expect("Error connecting to db");
+) -> anyhow::Result<()> {
+    let pg = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
 
     let skip_tables = match skip_tables_str.clone() {
         Some(tbls) => parse_skip_tables(&tbls),
@@ -42,23 +25,12 @@ pub async fn dump_db(
     let max_workers = concurrency.unwrap_or(5);
     info!("Running with concurrency of {}", max_workers);
 
-    // Now we can execute a simple statement that just returns its parameter.
-    let query_rows = pg.client
-        .query("SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname NOT LIKE 'pg_%' AND schemaname != 'information_schema'", &[])
-        .await?;
+    let query_rows = pg.get_tables().await.expect("Error fetching pg tables");
 
-    let rows: Vec<Row> = query_rows
+    let rows: Vec<Table> = query_rows
         .into_iter()
-        .filter(|r| {
-            let table_schema: &str = r.get(0);
-            let table_name: &str = r.get(1);
-
-            if should_skip(table_schema, table_name, &skip_tables) {
-                false
-            } else {
-                true
-            }
-        })
+        .filter(|r| !should_skip(r.schema.as_str(), r.name.as_str(), &skip_tables))
+        .map(|v| Table::new(v.name, v.schema, pg.clone(), None, None))
         .collect();
 
     let base_dir = format!("./data-dump");
@@ -68,34 +40,17 @@ pub async fn dump_db(
     let mut join_set: JoinSet<Result<Result<(), Box<dyn std::error::Error + Send>>, JoinError>> =
         JoinSet::new();
 
-    let table_map = Arc::new(Mutex::new(HashMap::new()));
-
     info!("Introspecting and taking a snapshot");
     for table in rows {
         while join_set.len() >= max_workers {
             let _ = join_set.join_next().await.unwrap().unwrap();
         }
 
-        let host_clone = host.clone();
-        let user_clone = user.clone();
-        let db_clone = db.clone();
-        let pw_clone = pw.clone();
         let base_dir_clone = base_dir.clone();
-        let table_map_clone = table_map.clone();
 
         let handle = task::spawn(async move {
-            let pg_db = Db::connect(host_clone, user_clone, db_clone, pw_clone)
-                .await
-                .expect("Error connecting to db");
-            let client = &pg_db.client;
-
-            let table_schema: &str = table.get(0);
-            let table_name: &str = table.get(1);
-
-            let columns = pg_db
-                .get_table_details(table_name)
-                .await
-                .expect("Error could now retrieve columns");
+            let table_schema: &str = &table.schema;
+            let table_name: &str = &table.name;
 
             let table_dir = format!("{}/{}", base_dir_clone, table_name);
             let table_path = Path::new(&table_dir);
@@ -104,26 +59,19 @@ pub async fn dump_db(
             let data_path = table_path.join("data.csv");
             let table_data_path = table_path.join("table.bin");
 
-            if let Err(e) = write_rows_to_csv(&client, &data_path, table_name, table_schema).await {
-                fs::remove_dir_all(&table_path).expect("Failed to delete directory");
-                panic!("Failed to write: {}", e);
-            }
+            let num_rows = table
+                .copy_out(&data_path)
+                .await
+                .expect("Error copying table data");
 
-            let pg_table = PgTable::new(
-                table_name.to_string(),
-                table_schema.to_string(),
-                data_path,
-                TableColumns::from_cols(&columns),
-            );
+            info!("Copied {num_rows} for {table_schema}.{table_name}");
+
+            let pg_table =
+                PgTable::new(table_name.to_string(), table_schema.to_string(), data_path);
             pg_table
                 .save_to_file(table_data_path)
                 .await
                 .expect("Error saving table info");
-
-            let mut map = table_map_clone.lock().await;
-            map.insert(format!("{table_schema}.{table_name}"), pg_table);
-
-            info!("Wrote out results for {}.{}", table_schema, table_name);
 
             Ok::<(), Box<dyn std::error::Error + Send>>(())
         });
@@ -149,49 +97,6 @@ pub async fn dump_db(
 
     fs::write(fk_content_path, fk_commands).expect("Err");
     fs::write(ddl_content_path, other_commands).expect("Err");
-
-    Ok(())
-}
-
-async fn write_rows_to_csv(
-    client: &Client,
-    path: &PathBuf,
-    table_name: &str,
-    table_schema: &str,
-) -> Result<(), Error> {
-    let full_path: PathBuf = create_and_canonicalize_path(path).expect("Error reading file");
-
-    let path_str: &str = full_path
-        .to_str()
-        .expect("Failed to convert PathBuf to str");
-
-    let copy_cmd = format!(
-        "COPY \"{table_schema}\".\"{table_name}\" TO STDOUT WITH CSV HEADER DELIMITER ','",
-        table_schema = table_schema,
-        table_name = table_name
-    );
-
-    let stmt = client.prepare(copy_cmd.as_str()).await?;
-    let unpinned_stream = client.copy_out(&stmt).await?;
-
-    // Open a file to write to
-    let mut file = File::create(Path::new(path_str))
-        .await
-        .expect("Error creating file");
-    let mut stream = Box::pin(unpinned_stream); // pin the stream
-
-    // Stream through the result and write to the file
-    while let Some(row) = stream.next().await {
-        match row {
-            Ok(bytes) => {
-                file.write(&bytes).await.expect("Error writing file");
-            }
-            Err(err) => {
-                eprintln!("Error reading row: {}", err);
-                return Err(err);
-            }
-        }
-    }
 
     Ok(())
 }

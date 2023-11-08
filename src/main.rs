@@ -1,6 +1,5 @@
 use cli::Mode;
 use simple_log::LogConfigBuilder;
-use tokio_postgres::Error;
 
 use crate::{dump::dump_db, restore::restore_db};
 use clap::Parser;
@@ -9,6 +8,7 @@ mod db;
 mod dump;
 mod restore;
 mod structs;
+mod table;
 mod utils;
 #[macro_use]
 extern crate simple_log;
@@ -30,7 +30,7 @@ fn init_logger(debug: bool) {
 }
 
 #[tokio::main] // By default, tokio_postgres uses the tokio crate as its runtime.
-async fn main() -> Result<(), Error> {
+async fn main() -> anyhow::Result<()> {
     let mode = Mode::parse();
 
     match mode {
