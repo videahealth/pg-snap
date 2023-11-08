@@ -1,13 +1,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::vec;
-
-use sqlx::postgres::PgRow;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
 use tokio::fs::File;
-use tokio_postgres::Row;
 
 use crate::db::Constraint;
 use crate::db::ForeignKey;
@@ -21,33 +17,6 @@ pub struct PgDb {
     pub extensions: HashMap<String, String>,
     pub user_defined_enums: Vec<UserDefinedEnum>,
 }
-
-// #[derive(Serialize, Deserialize, Debug, Clone)]
-// pub struct TableColumns {
-//     pub column_name: String,
-//     pub data_type: String,
-//     pub is_nullable: String,
-// }
-
-// impl TableColumns {
-//     pub fn from_cols(columns: &Vec<PgRow>) -> Vec<TableColumns> {
-//         let mut table_cols = vec![];
-
-//         for column in columns {
-//             let column_name: &str = column.get(0);
-//             let data_type: &str = column.get(1);
-//             let is_nullable: &str = column.get(2);
-
-//             table_cols.push(TableColumns {
-//                 column_name: column_name.to_string(),
-//                 data_type: data_type.to_string(),
-//                 is_nullable: is_nullable.to_string(),
-//             });
-//         }
-
-//         table_cols
-//     }
-// }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PgTable {

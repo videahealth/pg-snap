@@ -6,7 +6,6 @@ use crate::{
 };
 use std::{collections::HashSet, fs, path::Path, process::Command};
 use tokio::task::{self, JoinError, JoinSet};
-use tokio_postgres::Error;
 
 pub async fn dump_db(
     host: String,
@@ -15,7 +14,7 @@ pub async fn dump_db(
     pw: String,
     skip_tables_str: Option<String>,
     concurrency: Option<usize>,
-) -> Result<(), Error> {
+) -> anyhow::Result<()> {
     let pg = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
 
     let skip_tables = match skip_tables_str.clone() {
@@ -30,8 +29,8 @@ pub async fn dump_db(
 
     let rows: Vec<Table> = query_rows
         .into_iter()
-        .filter(|r| should_skip(r.schemaname.as_str(), r.tablename.as_str(), &skip_tables))
-        .map(|v| Table::new(v.tablename, v.schemaname, pg.clone(), None))
+        .filter(|r| !should_skip(r.schema.as_str(), r.name.as_str(), &skip_tables))
+        .map(|v| Table::new(v.name, v.schema, pg.clone(), None, None))
         .collect();
 
     let base_dir = format!("./data-dump");
@@ -61,7 +60,7 @@ pub async fn dump_db(
             let table_data_path = table_path.join("table.bin");
 
             let num_rows = table
-                .copy_in(&data_path)
+                .copy_out(&data_path)
                 .await
                 .expect("Error copying table data");
 
