@@ -1,8 +1,8 @@
 <div align="center">
-  <h1>pg-snap</h1>
+  <h1>PgSnap</h1>
 
   <p>
-  Tool to take database snapshots and restore them
+  Tool to take postgres database snapshots and restore them
 </a>
   </p>
 
