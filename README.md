@@ -3,14 +3,12 @@
 
   <p>
   Tool to take database snapshots and restore them
-</a>.
+</a>
   </p>
 
 </div>
 
-### Getting Started
-
-Install:
+### Install
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/videahealth/pg-snap/main/install.sh | sh
