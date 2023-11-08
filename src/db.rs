@@ -1,5 +1,6 @@
-use tokio_postgres::{Client, Error};
-use tokio_postgres::{NoTls, Row};
+use sqlx::postgres::PgConnectOptions;
+use sqlx::ConnectOptions;
+use sqlx::PgConnection;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Index {
@@ -36,103 +37,60 @@ pub struct UserDefinedEnum {
     enum_values: Vec<String>,
 }
 
+#[derive(sqlx::FromRow)]
+pub struct DbTable {
+    pub schemaname: String,
+    pub tablename: String,
+}
+
+#[derive(Clone)]
 pub struct Db {
     pub host: String,
     pub user: String,
     pub db: String,
     pub pw: String,
-    pub client: Client,
 }
 
 impl Db {
-    pub async fn connect(
-        host: String,
-        user: String,
-        db: String,
-        pw: String,
-    ) -> Result<Db, tokio_postgres::Error> {
-        // Connect to the database.
-        let (client, connection) = tokio_postgres::connect(
-            format!("host={host} user={user} dbname={db} password={pw}").as_str(),
-            NoTls,
-        )
-        .await?;
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
-
-        let new_db = Db {
-            client,
-            db,
-            host,
-            pw,
-            user,
-        };
-
-        Ok(new_db)
+    pub fn new(host: String, user: String, db: String, pw: String) -> Self {
+        Db { host, user, db, pw }
     }
-
-    pub async fn get_table_details(&self, table_name: &str) -> Result<Vec<Row>, Error> {
-        let columns = self
-            .client
-            .query(
-                "
-                WITH types AS (
-                    SELECT oid, typname
-                    FROM pg_type
-                )
-                SELECT 
-                    attname AS column_name,
-                    CASE WHEN attndims = 0 THEN t.typname ELSE t.typname || '[]' END AS data_type,
-                    CASE WHEN attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable
-                FROM 
-                    pg_attribute 
-                    JOIN types t ON pg_attribute.atttypid = t.oid
-                WHERE 
-                    attrelid = (
-                        SELECT oid
-                        FROM pg_class
-                        WHERE relname = $1
-                    ) AND 
-                    attnum > 0 AND 
-                    NOT attisdropped",
-                &[&table_name],
-            )
+    pub async fn connect(&self) -> anyhow::Result<PgConnection> {
+        let client = PgConnectOptions::new()
+            .username(&self.user)
+            .password(&self.pw)
+            .host(&self.host)
+            .database(&self.db)
+            .connect()
             .await?;
-
-        return Ok(columns);
+        Ok(client)
     }
-}
 
-pub async fn recreate_database(
-    host: String,
-    user: String,
-    dbname: String,
-    password: String,
-) -> Result<(), Error> {
-    let db = Db::connect(host, user, "postgres".to_string(), password).await?;
+    pub async fn recreate_database(&self) -> anyhow::Result<()> {
+        let mut client = self.connect().await?;
 
-    let terminate_sql = format!(
-        "SELECT pg_terminate_backend(pg_stat_activity.pid) \
-        FROM pg_stat_activity \
-        WHERE pg_stat_activity.datname = '{}' \
-        AND pid <> pg_backend_pid();",
-        dbname
-    );
-    db.client.execute(&terminate_sql, &[]).await?;
+        let terminate_sql = format!(
+            "SELECT pg_terminate_backend(pg_stat_activity.pid) \
+            FROM pg_stat_activity \
+            WHERE pg_stat_activity.datname = '{}' \
+            AND pid <> pg_backend_pid();",
+            self.db
+        );
 
-    db.client
-        .execute(&format!("DROP DATABASE IF EXISTS \"{}\"", dbname), &[])
-        .await?;
+        sqlx::query(&terminate_sql).execute(&mut client);
+        sqlx::query(&format!("DROP DATABASE IF EXISTS \"{}\"", self.db)).execute(&mut client);
+        sqlx::query(&format!("CREATE DATABASE \"{}\"", self.db)).execute(&mut client);
 
-    db.client
-        .execute(&format!("CREATE DATABASE \"{}\"", dbname), &[])
-        .await?;
+        Ok(())
+    }
 
-    Ok(())
+    pub async fn get_tables(&self) -> anyhow::Result<Vec<DbTable>> {
+        let mut client = self.connect().await?;
+
+        let  res =
+            sqlx::query_as::<_, DbTable>("SELECT schemaname, tablename FROM pg_catalog.pg_tables WHERE schemaname NOT LIKE 'pg_%' AND schemaname != 'information_schema'")
+                .fetch_all(&mut client).await?;
+
+        Ok(res)
+    }
 }

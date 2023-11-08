@@ -39,7 +39,7 @@ pub struct Restore {
 #[derive(Parser, Debug)]
 #[clap(
     author = "VideaHealth",
-    version = "0.3.0",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Tool to dump and restore database snapshots"
 )]
 pub enum Mode {

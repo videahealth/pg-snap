@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::vec;
 
+use sqlx::postgres::PgRow;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
@@ -21,38 +22,38 @@ pub struct PgDb {
     pub user_defined_enums: Vec<UserDefinedEnum>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct TableColumns {
-    pub column_name: String,
-    pub data_type: String,
-    pub is_nullable: String,
-}
+// #[derive(Serialize, Deserialize, Debug, Clone)]
+// pub struct TableColumns {
+//     pub column_name: String,
+//     pub data_type: String,
+//     pub is_nullable: String,
+// }
 
-impl TableColumns {
-    pub fn from_cols(columns: &Vec<Row>) -> Vec<TableColumns> {
-        let mut table_cols = vec![];
+// impl TableColumns {
+//     pub fn from_cols(columns: &Vec<PgRow>) -> Vec<TableColumns> {
+//         let mut table_cols = vec![];
 
-        for column in columns {
-            let column_name: &str = column.get(0);
-            let data_type: &str = column.get(1);
-            let is_nullable: &str = column.get(2);
+//         for column in columns {
+//             let column_name: &str = column.get(0);
+//             let data_type: &str = column.get(1);
+//             let is_nullable: &str = column.get(2);
 
-            table_cols.push(TableColumns {
-                column_name: column_name.to_string(),
-                data_type: data_type.to_string(),
-                is_nullable: is_nullable.to_string(),
-            });
-        }
+//             table_cols.push(TableColumns {
+//                 column_name: column_name.to_string(),
+//                 data_type: data_type.to_string(),
+//                 is_nullable: is_nullable.to_string(),
+//             });
+//         }
 
-        table_cols
-    }
-}
+//         table_cols
+//     }
+// }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PgTable {
     pub schema: String,
     pub name: String,
-    pub columns: Vec<TableColumns>,
+    // pub columns: Vec<TableColumns>,
     pub data_file: PathBuf,
 }
 
@@ -61,12 +62,12 @@ impl PgTable {
         name: String,
         schema: String,
         data_file: PathBuf,
-        columns: Vec<TableColumns>,
+        // columns: Vec<TableColumns>,
     ) -> Self {
         PgTable {
             name,
             schema,
-            columns,
+            // columns,
             data_file,
         }
     }

@@ -1,25 +1,20 @@
-# pg-snap
+<div align="center">
+  <h1>PgSnap</h1>
 
-Tool to take database snapshots and restore them
+  <p>
+  Tool to take postgres database snapshots and restore them
+</a>
+  </p>
 
-## Getting Started
+</div>
 
-Install:
-
-Available binaries:
-
-- `pg-snap-aarch64-apple-darwin` (Mac M1)
-- `pg-snap-x86_64-apple-darwin` (Mac Intel)
+### Install
 
 ```bash
-sudo curl -L -o /usr/local/bin/pg_snap https://github.com/videahealth/pg-snap/releases/download/v0.4.0/<binary>
-sudo chmod +x /usr/local/bin/pg_snap
-
-# In a new shell session
-pg_snap -h
+curl -sSL https://raw.githubusercontent.com/videahealth/pg-snap/main/install.sh | sh
 ```
 
-### Command
+### Usage
 
 ```bash
 pg_snap dump --username "postgres" --db "demodb" --host "localhost" --password "postgres" --skip-tables "test.*,public.Cats,public.Event*"

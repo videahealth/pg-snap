@@ -9,6 +9,7 @@ mod db;
 mod dump;
 mod restore;
 mod structs;
+mod table;
 mod utils;
 #[macro_use]
 extern crate simple_log;
