@@ -7,7 +7,7 @@ use tokio::task::{JoinError, JoinSet};
 use tokio::{fs, task};
 use tokio_postgres::Row;
 
-use crate::db::{recreate_database, Db};
+use crate::db::Db;
 use crate::structs::PgTable;
 use crate::utils::ask_for_confirmation;
 use anyhow::{anyhow, Error, Result};
