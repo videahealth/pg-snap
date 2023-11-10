@@ -98,9 +98,8 @@ pub async fn restore_db(
     }
 
     while let Some(output) = join_set.join_next().await {
-        match output.expect("Error in worker") {
-            Err(e) => eprintln!("Error in worker: {e}"),
-            Ok(_) => (),
+        if let Err(e) = output.expect("Error in worker") {
+            eprintln!("Error in worker: {e}")
         }
     }
 
@@ -151,7 +150,7 @@ async fn load_pg_tables(dir_path: &Path) -> Vec<PgTable> {
 }
 
 async fn read_from_file_and_write_to_db(
-    path: &PathBuf,
+    path: &Path,
     table: &Table,
     pg: &Db,
     ext_tables: &HashSet<String>,
@@ -205,7 +204,7 @@ async fn execute_ddl_file(
     username: &str,
     password: &str,
     host: &str,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<()> {
     let full_path: PathBuf = path.canonicalize()?;
     let full_path_clone = full_path.clone();

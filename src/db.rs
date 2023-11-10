@@ -119,7 +119,7 @@ impl Db {
             .username(&self.user)
             .password(&self.pw)
             .host(&self.host)
-            .database(&"postgres")
+            .database("postgres")
             .connect()
             .await?;
         Ok(client)

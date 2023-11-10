@@ -7,6 +7,9 @@ use crate::{
 use std::{collections::HashSet, fs, path::Path, process::Command};
 use tokio::task::{self, JoinError, JoinSet};
 
+type ThreadResult = Result<(), Box<dyn std::error::Error + Send>>;
+type JoinSetResult = Result<ThreadResult, JoinError>;
+
 pub async fn dump_db(
     host: String,
     user: String,
@@ -33,12 +36,11 @@ pub async fn dump_db(
         .map(|v| Table::new(v.name, v.schema, pg.clone(), None, None))
         .collect();
 
-    let base_dir = format!("./data-dump");
+    let base_dir = "./data-dump".to_string();
     let base_dir_path: &Path = base_dir.as_ref();
     fs::create_dir_all(base_dir.clone()).expect("Error creating directory");
 
-    let mut join_set: JoinSet<Result<Result<(), Box<dyn std::error::Error + Send>>, JoinError>> =
-        JoinSet::new();
+    let mut join_set: JoinSet<JoinSetResult> = JoinSet::new();
 
     info!("Introspecting and taking a snapshot");
     for table in rows {
@@ -54,7 +56,7 @@ pub async fn dump_db(
 
             let table_dir = format!("{}/{}", base_dir_clone, table_name);
             let table_path = Path::new(&table_dir);
-            fs::create_dir_all(&table_path).expect("Error creating directory");
+            fs::create_dir_all(table_path).expect("Error creating directory");
 
             let data_path = table_path.join("data.csv");
             let table_data_path = table_path.join("table.bin");
@@ -80,9 +82,8 @@ pub async fn dump_db(
     }
 
     while let Some(output) = join_set.join_next().await {
-        match output.expect("Error in worker") {
-            Err(e) => eprintln!("Error in worker: {e}"),
-            Ok(_) => (),
+        if let Err(e) = output.expect("Error in worker") {
+            eprintln!("Error in worker: {e}");
         }
     }
 

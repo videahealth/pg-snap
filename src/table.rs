@@ -31,7 +31,7 @@ impl Table {
             is_extension,
             db_conn,
             full_name: format!("{}.{}", schema, name),
-            data_file_path: data_file_path,
+            data_file_path,
         }
     }
 
@@ -92,9 +92,7 @@ impl Table {
             row_count += bytecount::count(&bytes, b'\n') as u64;
         }
 
-        if row_count > 0 {
-            row_count -= 1;
-        }
+        row_count = row_count.saturating_sub(1);
 
         writer.flush().await?;
 

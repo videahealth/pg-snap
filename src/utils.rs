@@ -46,13 +46,13 @@ mod tests {
 }
 
 pub fn extract_and_remove_fk_constraints(input: String) -> std::io::Result<(String, String)> {
-    let mut lines = input.split("\n");
+    let lines = input.split('\n');
 
     let mut remaining_content = String::new();
     let mut extracted_content = String::new();
     let mut capture = false;
 
-    while let Some(line) = lines.next() {
+    for line in lines {
         if line.starts_with("-- Name:") {
             if line.contains("Type: FK CONSTRAINT") {
                 // Start capturing this block for extraction
