@@ -5,10 +5,10 @@ on:
     branches:
       - main
   workflow_dispatch:
+
 jobs:
   test:
     name: test
-    needs: get-msrv
     env:
       RUST_BACKTRACE: 1
     runs-on: ${{ matrix.os }}
