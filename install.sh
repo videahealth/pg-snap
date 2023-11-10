@@ -11,28 +11,40 @@ TAG_NAME=$(echo "$LATEST_RELEASE" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
 ARCH=$(uname -m)
 
 if [ "$ARCH" = "arm64" ]; then
-    BINARY_ARCHIVE="pg-snap-v$TAG_NAME-aarch64-apple-darwin.tar.gz"
+    BINARY_TAR="pg-snap-$TAG_NAME-aarch64-apple-darwin.tar.gz"
 elif [ "$ARCH" = "x86_64" ]; then
-    BINARY_ARCHIVE="pg-snap-v$TAG_NAME-x86_64-apple-darwin.tar.gz"
+    BINARY_TAR="pg-snap-$TAG_NAME-x86_64-apple-darwin.tar.gz"
 else
     echo "Unsupported architecture: $ARCH"
     exit 1
 fi
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG_NAME/$BINARY_ARCHIVE"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG_NAME/$BINARY_TAR"
 
-curl -L -o "/tmp/$BINARY_ARCHIVE" "$DOWNLOAD_URL"
-tar -xzf "/tmp/$BINARY_ARCHIVE" -C /tmp
-
-BINARY_PATH="/tmp/pg-snap"
-
-if [ -f "$BINARY_PATH" ]; then
-    sudo mv "$BINARY_PATH" /usr/local/bin/pg_snap
-    sudo chmod +x /usr/local/bin/pg_snap
-    echo "pg_snap installed successfully."
-else
-    echo "Failed to find the pg_snap binary in the archive."
+TMP_DIR=$(mktemp -d)
+ARCHIVE_PATH="$TMP_DIR/$BINARY_TAR"
+curl -L -o "$ARCHIVE_PATH" "$DOWNLOAD_URL"
+if [ ! -f "$ARCHIVE_PATH" ]; then
+    echo "Download failed: $DOWNLOAD_URL"
     exit 1
 fi
 
-/usr/local/bin/pg_snap -h
+tar -xzf "$ARCHIVE_PATH" -C "$TMP_DIR"
+if [ $? -ne 0 ]; then
+    echo "Failed to extract the archive: $ARCHIVE_PATH"
+    exit 1
+fi
+
+BINARY_PATH=$(find "$TMP_DIR" -name "pg-snap" -type f)
+if [ -z "$BINARY_PATH" ]; then
+    echo "Binary not found in the extracted files."
+    exit 1
+fi
+
+sudo mv "$BINARY_PATH" /usr/local/bin/pg_snap
+
+sudo chmod +x /usr/local/bin/pg_snap
+
+rm -rf "$TMP_DIR"
+
+pg_snap -h
