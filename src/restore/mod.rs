@@ -16,11 +16,18 @@ pub async fn restore_db(
     user: String,
     db: String,
     pw: String,
-    concurrency: Option<usize>,
+    concurrency: usize,
+    file_path: String,
 ) {
     let database = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
 
-    let base_dir = Path::new("./data-dump");
+    let base_dir_str = file_path;
+    let base_dir = Path::new(&base_dir_str);
+
+    if !base_dir.exists() {
+        return error!("Data directory {base_dir_str} does not exist");
+    }
+
     let pg_tables = load_pg_tables(base_dir).await;
 
     let ext_tables = database
@@ -47,7 +54,7 @@ pub async fn restore_db(
         })
         .collect();
 
-    let max_workers = concurrency.unwrap_or(3);
+    let max_workers = concurrency;
     info!("Running with concurrency of {}", max_workers);
 
     let conf_string =

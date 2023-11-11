@@ -4,6 +4,7 @@ use simple_log::LogConfigBuilder;
 use crate::{dump::dump_db, restore::restore_db};
 use clap::Parser;
 mod cli;
+mod consts;
 mod db;
 mod dump;
 mod restore;
@@ -42,7 +43,8 @@ async fn main() -> anyhow::Result<()> {
                 args.common.db,
                 args.common.password,
                 args.skip_tables,
-                args.common.concurrency,
+                args.concurrency,
+                args.common.file_path,
             )
             .await
             {
@@ -57,7 +59,8 @@ async fn main() -> anyhow::Result<()> {
                 args.common.username,
                 args.common.db,
                 args.common.password,
-                args.common.concurrency,
+                args.concurrency,
+                args.common.file_path,
             )
             .await;
         }
