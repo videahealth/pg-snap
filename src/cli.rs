@@ -24,14 +24,6 @@ pub struct CommonArgs {
 
     #[clap(short = 'D', long, help = "Enable debug mode for additional output")]
     pub debug: bool,
-
-    #[clap(
-        short = 'P',
-        long,
-        help = "File path used for dump or restore operations (optional)",
-        default_value = DEFAULT_DUMP_DIR
-    )]
-    pub file_path: String,
 }
 
 #[derive(Parser, Debug)]
@@ -48,6 +40,14 @@ pub struct Dump {
 
     #[clap(short, long, help = "Set the number of concurrent threads (optional)", default_value = DEFAULT_DUMP_NUMBER_OF_WORKERS)]
     pub concurrency: usize,
+
+    #[clap(
+        short = 'P',
+        long,
+        help = "Folder path used to store data dump (optional)",
+        default_value = DEFAULT_DUMP_DIR
+    )]
+    pub file_path: String,
 }
 
 #[derive(Parser, Debug)]
@@ -57,6 +57,14 @@ pub struct Restore {
 
     #[clap(short, long, help = "Set the number of concurrent threads (optional)", default_value = DEFAULT_RESTORE_NUMBER_OF_WORKERS)]
     pub concurrency: usize,
+
+    #[clap(
+        short = 'P',
+        long,
+        help = "Folder path to restore dump from (optional)",
+        default_value = DEFAULT_DUMP_DIR
+    )]
+    pub file_path: String,
 }
 
 #[derive(Parser, Debug)]

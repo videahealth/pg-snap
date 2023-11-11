@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
                 args.common.password,
                 args.skip_tables,
                 args.concurrency,
-                args.common.file_path,
+                args.file_path,
             )
             .await
             {
@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
                 args.common.db,
                 args.common.password,
                 args.concurrency,
-                args.common.file_path,
+                args.file_path,
             )
             .await;
         }
