@@ -16,7 +16,8 @@ pub async fn dump_db(
     db: String,
     pw: String,
     skip_tables_str: Option<String>,
-    concurrency: Option<usize>,
+    concurrency: usize,
+    file_path: String,
 ) -> anyhow::Result<()> {
     let pg = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
 
@@ -25,7 +26,7 @@ pub async fn dump_db(
         None => HashSet::new(),
     };
 
-    let max_workers = concurrency.unwrap_or(5);
+    let max_workers = concurrency;
     info!("Running with concurrency of {}", max_workers);
 
     let query_rows = pg.get_tables().await.expect("Error fetching pg tables");
@@ -36,7 +37,7 @@ pub async fn dump_db(
         .map(|v| Table::new(v.name, v.schema, pg.clone(), None, None))
         .collect();
 
-    let base_dir = "./data-dump".to_string();
+    let base_dir = file_path;
     let base_dir_path: &Path = base_dir.as_ref();
     fs::create_dir_all(base_dir.clone()).expect("Error creating directory");
 

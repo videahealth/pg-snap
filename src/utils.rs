@@ -22,29 +22,6 @@ pub fn should_skip(table_schema: &str, table_name: &str, skip_tables: &HashSet<S
         })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_should_skip() {
-        let mut skip_tables = HashSet::new();
-        skip_tables.insert("public.*".to_string());
-        skip_tables.insert("test.Events*".to_string());
-
-        // Check whole schema skipping
-        assert_eq!(should_skip("public", "AnyTable", &skip_tables), true);
-        // Check table prefix skipping
-        assert_eq!(should_skip("test", "EventsTable", &skip_tables), true);
-        // Check exact table skipping (not in our skip_tables set for now)
-        assert_eq!(should_skip("test", "ExactTable", &skip_tables), false);
-        // Check non-specified schema
-        assert_eq!(should_skip("other", "AnyTable", &skip_tables), false);
-        // Check non-matching prefix
-        assert_eq!(should_skip("test", "NotEventsTable", &skip_tables), false);
-    }
-}
-
 pub fn extract_and_remove_fk_constraints(input: String) -> std::io::Result<(String, String)> {
     let lines = input.split('\n');
 
@@ -118,5 +95,23 @@ pub fn read_first_line(path: &PathBuf) -> anyhow::Result<String> {
             Ok(quoted.join(","))
         }
         None => Err(anyhow!("File was empty")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip() {
+        let mut skip_tables = HashSet::new();
+        skip_tables.insert("public.*".to_string());
+        skip_tables.insert("test.Events*".to_string());
+
+        assert_eq!(should_skip("public", "AnyTable", &skip_tables), true);
+        assert_eq!(should_skip("test", "EventsTable", &skip_tables), true);
+        assert_eq!(should_skip("test", "ExactTable", &skip_tables), false);
+        assert_eq!(should_skip("other", "AnyTable", &skip_tables), false);
+        assert_eq!(should_skip("test", "NotEventsTable", &skip_tables), false);
     }
 }
