@@ -8,7 +8,8 @@ use tokio::{fs, task};
 use crate::db::Db;
 use crate::structs::PgTable;
 use crate::table::Table;
-use crate::utils::ask_for_confirmation;
+use crate::utils::{ask_for_confirmation, get_major_version};
+use anyhow::anyhow;
 use anyhow::Result;
 
 pub async fn restore_db(
@@ -17,8 +18,24 @@ pub async fn restore_db(
     db: String,
     pw: String,
     concurrency: Option<usize>,
-) {
+) -> anyhow::Result<()> {
     let database = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
+
+    let remote_v = database
+        .get_version()
+        .await
+        .expect("Error getting PG version");
+    let pg_restore_v = get_pg_restore_version().expect("Error executing pg restore");
+    let major_version =
+        get_major_version(remote_v.clone()).expect("Error getting major postgres version");
+
+    if !pg_restore_v.contains(&major_version) {
+        return Err(anyhow!(
+            "\nError: Remote postgres major version: {}\n does not match \npg_restore major version: {}",
+            remote_v,
+            pg_restore_v
+        ));
+    }
 
     let base_dir = Path::new("./data-dump");
     let pg_tables = load_pg_tables(base_dir).await;
@@ -113,8 +130,14 @@ pub async fn restore_db(
     let database = database.clone();
 
     match database.write_table_sequences().await {
-        Err(e) => warn!("Error executing SEQ updates: {}", e),
-        Ok(_) => info!("Executed SEQ updates"),
+        Err(e) => {
+            warn!("Error executing SEQ updates: {}", e);
+            return Ok(());
+        }
+        Ok(_) => {
+            info!("Executed SEQ updates");
+            return Ok(());
+        }
     }
 }
 
@@ -229,4 +252,29 @@ async fn execute_ddl_file(
     }
 
     Ok(())
+}
+
+pub fn get_pg_restore_version() -> std::io::Result<String> {
+    let mut command = Command::new("pg_restore");
+
+    command.arg("--version");
+
+    let output = command
+        .output()
+        .expect("Failed to execute pg_dump command.");
+
+    if !output.status.success() {
+        eprintln!(
+            "Error executing pg_dump: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "pg_dump command failed",
+        ));
+    }
+
+    let result = String::from_utf8(output.stdout).expect("Error reading stdout");
+
+    Ok(result)
 }
