@@ -120,3 +120,11 @@ pub fn read_first_line(path: &PathBuf) -> anyhow::Result<String> {
         None => Err(anyhow!("File was empty")),
     }
 }
+
+pub fn get_major_version(v: String) -> anyhow::Result<String> {
+    let major_version = v
+        .split(".")
+        .next()
+        .ok_or(anyhow!("Error getting postgres version"))?;
+    Ok(major_version.to_string())
+}

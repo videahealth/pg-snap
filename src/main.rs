@@ -52,14 +52,18 @@ async fn main() -> anyhow::Result<()> {
         }
         Mode::Restore(args) => {
             init_logger(args.common.debug);
-            restore_db(
+            match restore_db(
                 args.common.host,
                 args.common.username,
                 args.common.db,
                 args.common.password,
                 args.common.concurrency,
             )
-            .await;
+            .await
+            {
+                Ok(_) => println!("Success!"),
+                Err(error) => panic!("Error: {}", error),
+            };
         }
     }
 

@@ -92,6 +92,11 @@ pub struct DbExtensionTable {
     pub extension_name: String,
 }
 
+#[derive(sqlx::FromRow)]
+pub struct PgVersion {
+    pub regexp_matches: String,
+}
+
 #[derive(Clone)]
 pub struct Db {
     pub host: String,
@@ -104,6 +109,24 @@ impl Db {
     pub fn new(host: String, user: String, db: String, pw: String) -> Self {
         Db { host, user, db, pw }
     }
+
+    pub async fn get_version(&self) -> anyhow::Result<String> {
+        let mut client = self.connect().await?;
+
+        let res = sqlx::query_as::<_, PgVersion>(
+            r"SELECT (regexp_matches(version(), '^\w+SQL (\d+\.\d+)'))[1]",
+        )
+        .fetch_all(&mut client)
+        .await?;
+
+        let pg_version = &res[0];
+        let version = &pg_version.regexp_matches;
+
+        let remote_version = version.to_string();
+
+        Ok(remote_version.to_string())
+    }
+
     pub async fn connect(&self) -> anyhow::Result<PgConnection> {
         let client = PgConnectOptions::new()
             .username(&self.user)

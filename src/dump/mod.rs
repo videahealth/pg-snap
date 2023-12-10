@@ -2,8 +2,9 @@ use crate::{
     db::Db,
     structs::PgTable,
     table::Table,
-    utils::{extract_and_remove_fk_constraints, parse_skip_tables, should_skip},
+    utils::{extract_and_remove_fk_constraints, get_major_version, parse_skip_tables, should_skip},
 };
+use anyhow::anyhow;
 use std::{collections::HashSet, fs, path::Path, process::Command};
 use tokio::task::{self, JoinError, JoinSet};
 
@@ -19,6 +20,19 @@ pub async fn dump_db(
     concurrency: Option<usize>,
 ) -> anyhow::Result<()> {
     let pg = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
+
+    let remote_v = pg.get_version().await.expect("Error getting PG version");
+    let pg_dump_v = get_pg_dump_version().expect("Error executing pg dump");
+    let major_version =
+        get_major_version(remote_v.clone()).expect("Error getting major postgres version");
+
+    if !pg_dump_v.contains(&major_version) {
+        return Err(anyhow!(
+            "\nError: Remote postgres major version: {}\n does not match \npg_dump major version: {}",
+            remote_v,
+            pg_dump_v
+        ));
+    }
 
     let skip_tables = match skip_tables_str.clone() {
         Some(tbls) => parse_skip_tables(&tbls),
@@ -122,6 +136,32 @@ pub fn dump_schema_to_file(
         .arg("-d")
         .arg(dbname)
         .arg("--schema-only");
+
+    let output = command
+        .output()
+        .expect("Failed to execute pg_dump command.");
+
+    if !output.status.success() {
+        eprintln!(
+            "Error executing pg_dump: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "pg_dump command failed",
+        ));
+    }
+
+    let result = String::from_utf8(output.stdout).expect("Error reading stdout");
+
+    Ok(result)
+}
+
+pub fn get_pg_dump_version() -> std::io::Result<String> {
+    // Create and configure the pg_dump command
+    let mut command = Command::new("pg_dump");
+
+    command.arg("--version");
 
     let output = command
         .output()
