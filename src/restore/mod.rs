@@ -8,9 +8,9 @@ use tokio::{fs, task};
 use crate::db::Db;
 use crate::structs::PgTable;
 use crate::table::Table;
-use crate::utils::{ask_for_confirmation, get_major_version};
-use anyhow::anyhow;
+use crate::utils::{ask_for_confirmation, execute_command, get_major_version};
 use anyhow::Result;
+use anyhow::{anyhow, Context};
 
 pub async fn restore_db(
     host: String,
@@ -21,13 +21,9 @@ pub async fn restore_db(
 ) -> anyhow::Result<()> {
     let database = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
 
-    let remote_v = database
-        .get_version()
-        .await
-        .expect("Error getting PG version");
-    let pg_restore_v = get_pg_restore_version().expect("Error executing pg restore");
-    let major_version =
-        get_major_version(remote_v.clone()).expect("Error getting major postgres version");
+    let remote_v = database.get_version().await?;
+    let pg_restore_v = get_pg_restore_version()?;
+    let major_version = get_major_version(remote_v.clone())?;
 
     if !pg_restore_v.contains(&major_version) {
         return Err(anyhow!(
@@ -38,12 +34,12 @@ pub async fn restore_db(
     }
 
     let base_dir = Path::new("./data-dump");
-    let pg_tables = load_pg_tables(base_dir).await;
+    let pg_tables = load_pg_tables(base_dir).await?;
 
     let ext_tables = database
         .get_extension_tables()
         .await
-        .expect("Error getting table extensions");
+        .context("Error getting table extensions")?;
     let ext_tables_set: HashSet<String> = ext_tables
         .into_iter()
         .map(|v| format!("{}.{}", v.schema, v.name))
@@ -75,7 +71,7 @@ pub async fn restore_db(
     database
         .recreate_database()
         .await
-        .expect("Error dropping and recrating database");
+        .context("Error dropping and recrating database")?;
 
     let ddl_file_path = base_dir.join("ddl.sql");
 
@@ -96,18 +92,24 @@ pub async fn restore_db(
         }
 
         let handle = task::spawn(async move {
-            if let Err(e) = read_from_file_and_write_to_db(
-                &tbl.get_data_file_path().expect("Error getting data path"),
-                &tbl,
-                &database,
-                &ext_tables_set_clone,
-            )
-            .await
-            {
-                warn!(
-                    "Error copying data for table: {}.{}: {}",
-                    tbl.schema, tbl.name, e
-                )
+            match &tbl.get_data_file_path().context("Error getting data path") {
+                Ok(path) => {
+                    if let Err(e) =
+                        read_from_file_and_write_to_db(path, &tbl, &database, &ext_tables_set_clone)
+                            .await
+                    {
+                        warn!(
+                            "Error copying data for table: {}.{}: {}",
+                            tbl.schema, tbl.name, e
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Error getting data path for table: {}.{}: {}",
+                        tbl.schema, tbl.name, e
+                    );
+                }
             }
         });
 
@@ -115,7 +117,7 @@ pub async fn restore_db(
     }
 
     while let Some(output) = join_set.join_next().await {
-        if let Err(e) = output.expect("Error in worker") {
+        if let Err(e) = output.context("Error in worker")? {
             eprintln!("Error in worker: {e}")
         }
     }
@@ -141,35 +143,33 @@ pub async fn restore_db(
     }
 }
 
-async fn load_pg_tables(dir_path: &Path) -> Vec<PgTable> {
+async fn load_pg_tables(dir_path: &Path) -> Result<Vec<PgTable>> {
     let mut pg_tables: Vec<PgTable> = vec![];
 
     // Read the directory
-    let mut entries = fs::read_dir(dir_path).await.expect("Could not read dir");
+    let mut entries = fs::read_dir(dir_path).await.context("Could not read dir")?;
 
     // Process each entry in the directory
     while let Some(entry) = entries
         .next_entry()
         .await
-        .expect("Could not get next entry")
+        .context("Could not get next entry")?
     {
         if entry
             .file_type()
             .await
-            .expect("Could not get file type")
+            .context("Could not get file type")?
             .is_dir()
         {
             let full_path = entry.path().join("table.bin");
 
-            pg_tables.push(
-                PgTable::from_file(full_path)
-                    .await
-                    .expect("Could not deserialize file"),
-            )
+            let pg_table_file = PgTable::from_file(full_path).await?;
+
+            pg_tables.push(pg_table_file)
         }
     }
 
-    pg_tables
+    Ok(pg_tables)
 }
 
 async fn read_from_file_and_write_to_db(
@@ -233,7 +233,7 @@ async fn execute_ddl_file(
     let full_path_clone = full_path.clone();
     let full_path_str = full_path_clone
         .to_str()
-        .expect("Failed to convert PathBuf to str");
+        .context("Failed to convert PathBuf to str")?;
 
     let output = Command::new("psql")
         .env("PGPASSWORD", password)
@@ -254,27 +254,9 @@ async fn execute_ddl_file(
     Ok(())
 }
 
-pub fn get_pg_restore_version() -> std::io::Result<String> {
+pub fn get_pg_restore_version() -> Result<String> {
     let mut command = Command::new("pg_restore");
-
     command.arg("--version");
 
-    let output = command
-        .output()
-        .expect("Failed to execute pg_dump command.");
-
-    if !output.status.success() {
-        eprintln!(
-            "Error executing pg_dump: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "pg_dump command failed",
-        ));
-    }
-
-    let result = String::from_utf8(output.stdout).expect("Error reading stdout");
-
-    Ok(result)
+    execute_command("pg_restore", &mut command)
 }

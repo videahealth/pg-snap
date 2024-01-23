@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use cli::Mode;
 use simple_log::LogConfigBuilder;
 
@@ -29,8 +30,7 @@ fn init_logger(debug: bool) {
     simple_log::new(cfg).expect("Unable to initialize logger");
 }
 
-#[tokio::main] // By default, tokio_postgres uses the tokio crate as its runtime.
-async fn main() -> anyhow::Result<()> {
+async fn try_main() -> anyhow::Result<()> {
     let mode = Mode::parse();
 
     match mode {
@@ -46,9 +46,9 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
             {
-                Ok(_) => println!("Success!"),
-                Err(error) => panic!("Error: {}", error),
-            };
+                Ok(_) => Ok(()),
+                Err(error) => Err(anyhow!("Error running dump command:\n \t{}", error)),
+            }
         }
         Mode::Restore(args) => {
             init_logger(args.common.debug);
@@ -61,10 +61,21 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
             {
-                Ok(_) => println!("Success!"),
-                Err(error) => panic!("Error: {}", error),
-            };
+                Ok(_) => Ok(()),
+                Err(error) => Err(anyhow!("Error running restore command:\n \t{}", error)),
+            }
         }
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    if let Err(err) = try_main().await {
+        eprintln!("ERROR: {}", err);
+        err.chain()
+            .skip(1)
+            .for_each(|cause| eprintln!("because: {}", cause));
+        std::process::exit(1);
     }
 
     Ok(())
