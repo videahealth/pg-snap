@@ -1,8 +1,11 @@
 use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
-use std::io::BufRead;
 use std::io::Write;
+use std::io::{BufRead, ErrorKind};
+use std::process::Command;
 use std::{collections::HashSet, fs::File, io, path::PathBuf};
 
 pub fn parse_skip_tables(arg: &str) -> HashSet<String> {
@@ -127,4 +130,36 @@ pub fn get_major_version(v: String) -> anyhow::Result<String> {
         .next()
         .ok_or(anyhow!("Error getting postgres version"))?;
     Ok(major_version.to_string())
+}
+
+pub fn execute_command(command_name: &str, command: &mut Command) -> Result<String> {
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(e) => {
+            if e.kind() == ErrorKind::NotFound {
+                return Err(anyhow::anyhow!(
+                    "{} command not found in system PATH",
+                    command_name
+                ));
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Failed to execute {} command",
+                    command_name
+                ));
+            }
+        }
+    };
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Error executing {}: {}",
+            command_name,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    String::from_utf8(output.stdout).context(format!(
+        "Error reading stdout from {} command",
+        command_name
+    ))
 }

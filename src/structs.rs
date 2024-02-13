@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
+use anyhow::Result;
 use tokio::fs::File;
 
 use crate::db::Constraint;
@@ -41,7 +42,7 @@ impl PgTable {
         }
     }
 
-    pub async fn save_to_file(&self, path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn save_to_file(&self, path: PathBuf) -> Result<()> {
         // Serialize the struct to binary
         let serialized_data = bincode::serialize(self)?;
 
@@ -52,7 +53,7 @@ impl PgTable {
         Ok(())
     }
 
-    pub async fn from_file(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn from_file(path: PathBuf) -> Result<Self> {
         // Open the file and read its contents
         let mut file = File::open(path).await?;
         let mut buffer = Vec::new();

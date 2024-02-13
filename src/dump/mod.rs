@@ -2,9 +2,12 @@ use crate::{
     db::Db,
     structs::PgTable,
     table::Table,
-    utils::{extract_and_remove_fk_constraints, get_major_version, parse_skip_tables, should_skip},
+    utils::{
+        execute_command, extract_and_remove_fk_constraints, get_major_version, parse_skip_tables,
+        should_skip,
+    },
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, Context, Result};
 use std::{collections::HashSet, fs, path::Path, process::Command};
 use tokio::task::{self, JoinError, JoinSet};
 
@@ -21,10 +24,9 @@ pub async fn dump_db(
 ) -> anyhow::Result<()> {
     let pg = Db::new(host.clone(), user.clone(), db.clone(), pw.clone());
 
-    let remote_v = pg.get_version().await.expect("Error getting PG version");
-    let pg_dump_v = get_pg_dump_version().expect("Error executing pg dump");
-    let major_version =
-        get_major_version(remote_v.clone()).expect("Error getting major postgres version");
+    let remote_v = pg.get_version().await?;
+    let pg_dump_v = get_pg_dump_version()?;
+    let major_version = get_major_version(remote_v.clone())?;
 
     if !pg_dump_v.contains(&major_version) {
         return Err(anyhow!(
@@ -42,7 +44,7 @@ pub async fn dump_db(
     let max_workers = concurrency.unwrap_or(5);
     info!("Running with concurrency of {}", max_workers);
 
-    let query_rows = pg.get_tables().await.expect("Error fetching pg tables");
+    let query_rows = pg.get_tables().await.context("Error fetching pg tables")?;
 
     let rows: Vec<Table> = query_rows
         .into_iter()
@@ -52,7 +54,7 @@ pub async fn dump_db(
 
     let base_dir = "./data-dump".to_string();
     let base_dir_path: &Path = base_dir.as_ref();
-    fs::create_dir_all(base_dir.clone()).expect("Error creating directory");
+    fs::create_dir_all(base_dir.clone()).context("Error creating directory")?;
 
     let mut join_set: JoinSet<JoinSetResult> = JoinSet::new();
 
@@ -70,7 +72,7 @@ pub async fn dump_db(
 
             let table_dir = format!("{}/{}", base_dir_clone, table_name);
             let table_path = Path::new(&table_dir);
-            fs::create_dir_all(table_path).expect("Error creating directory");
+            let _ = fs::create_dir_all(table_path).context("Error creating directory");
 
             let data_path = table_path.join("data.csv");
             let table_data_path = table_path.join("table.bin");
@@ -78,16 +80,16 @@ pub async fn dump_db(
             let num_rows = table
                 .copy_out(&data_path)
                 .await
-                .expect("Error copying table data");
+                .context("Error copying table data")?;
 
             info!("Copied {num_rows} for {table_schema}.{table_name}");
 
             let pg_table =
                 PgTable::new(table_name.to_string(), table_schema.to_string(), data_path);
-            pg_table
+            let _ = pg_table
                 .save_to_file(table_data_path)
                 .await
-                .expect("Error saving table info");
+                .context("Error saving table info");
 
             Ok::<(), Box<dyn std::error::Error + Send>>(())
         });
@@ -96,34 +98,33 @@ pub async fn dump_db(
     }
 
     while let Some(output) = join_set.join_next().await {
-        if let Err(e) = output.expect("Error in worker") {
+        if let Err(e) = output.context("Error in worker") {
             eprintln!("Error in worker: {e}");
         }
     }
 
     info!("Using pg_dump to extract database DDL");
-    let res = dump_schema_to_file(&user, &pw, &host, 5432, &db).expect("Error writing sql file");
+    let res =
+        dump_schema_to_file(&user, &pw, &host, 5432, &db).context("Error writing sql file")?;
 
     let fk_content_path = base_dir_path.join("fk_constraints.sql");
     let ddl_content_path = base_dir_path.join("ddl.sql");
 
     let (fk_commands, other_commands) =
-        extract_and_remove_fk_constraints(res).expect("Error extracting DDL file");
+        extract_and_remove_fk_constraints(res).context("Error extracting DDL file")?;
 
-    fs::write(fk_content_path, fk_commands).expect("Err");
-    fs::write(ddl_content_path, other_commands).expect("Err");
+    let _ = fs::write(fk_content_path, fk_commands).context("Err");
+    let _ = fs::write(ddl_content_path, other_commands).context("Err");
 
     Ok(())
 }
-
 pub fn dump_schema_to_file(
     username: &str,
     password: &str,
     host: &str,
     port: u16,
     dbname: &str,
-) -> std::io::Result<String> {
-    // Create and configure the pg_dump command
+) -> Result<String> {
     let mut command = Command::new("pg_dump");
     command
         .env("PGPASSWORD", password)
@@ -137,48 +138,12 @@ pub fn dump_schema_to_file(
         .arg(dbname)
         .arg("--schema-only");
 
-    let output = command
-        .output()
-        .expect("Failed to execute pg_dump command.");
-
-    if !output.status.success() {
-        eprintln!(
-            "Error executing pg_dump: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "pg_dump command failed",
-        ));
-    }
-
-    let result = String::from_utf8(output.stdout).expect("Error reading stdout");
-
-    Ok(result)
+    execute_command("pg_dump", &mut command)
 }
 
-pub fn get_pg_dump_version() -> std::io::Result<String> {
-    // Create and configure the pg_dump command
+pub fn get_pg_dump_version() -> Result<String> {
     let mut command = Command::new("pg_dump");
-
     command.arg("--version");
 
-    let output = command
-        .output()
-        .expect("Failed to execute pg_dump command.");
-
-    if !output.status.success() {
-        eprintln!(
-            "Error executing pg_dump: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "pg_dump command failed",
-        ));
-    }
-
-    let result = String::from_utf8(output.stdout).expect("Error reading stdout");
-
-    Ok(result)
+    execute_command("pg_dump", &mut command)
 }

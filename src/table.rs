@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tokio::{fs::File, io::BufWriter};
 
 use crate::{db::Db, utils::read_first_line};
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
@@ -52,7 +52,7 @@ impl Table {
     ) -> anyhow::Result<u64> {
         let mut client = self.db_conn.connect().await?;
         let file = tokio::fs::File::open(out_file).await?;
-        let first_line = read_first_line(out_file).expect("Failed to read the first line");
+        let first_line = read_first_line(out_file).context("Failed to read the first line")?;
 
         let copy_cmd = match schema {
             Some(schema) => format!(
