@@ -1,10 +1,9 @@
 use crate::{
     db::Db,
+    relations::get_tables_to_copy,
     structs::PgTable,
-    table::Table,
     utils::{
         execute_command, extract_and_remove_fk_constraints, get_major_version, parse_skip_tables,
-        should_skip,
     },
 };
 use anyhow::{anyhow, Context, Result};
@@ -44,13 +43,18 @@ pub async fn dump_db(
     let max_workers = concurrency.unwrap_or(5);
     info!("Running with concurrency of {}", max_workers);
 
-    let query_rows = pg.get_tables().await.context("Error fetching pg tables")?;
+    let rows = pg
+        .get_tables(&skip_tables)
+        .await
+        .context("Error fetching pg tables")?;
 
-    let rows: Vec<Table> = query_rows
-        .into_iter()
-        .filter(|r| !should_skip(r.schema.as_str(), r.name.as_str(), &skip_tables))
-        .map(|v| Table::new(v.name, v.schema, pg.clone(), None, None))
-        .collect();
+    let rel = pg.get_table_relations().await?;
+
+    get_tables_to_copy(&rel, &rows)?;
+
+    if true {
+        return Ok(());
+    }
 
     let base_dir = "./data-dump".to_string();
     let base_dir_path: &Path = base_dir.as_ref();

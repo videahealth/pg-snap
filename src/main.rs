@@ -5,12 +5,15 @@ use simple_log::LogConfigBuilder;
 use crate::{dump::dump_db, restore::restore_db};
 use clap::Parser;
 mod cli;
+mod config;
 mod db;
 mod dump;
+mod relations;
 mod restore;
 mod structs;
 mod table;
 mod utils;
+
 #[macro_use]
 extern crate simple_log;
 

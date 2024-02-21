@@ -29,3 +29,4 @@ sqlx = { version = "0.7.2", features = [
 ] }
 futures-util = "0.3.29"
 bytecount = "0.6.7"
+petgraph = "0.6.4"

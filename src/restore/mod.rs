@@ -56,6 +56,7 @@ pub async fn restore_db(
                 database.clone(),
                 Some(is_extension),
                 Some(v.data_file.clone()),
+                None,
             )
         })
         .collect();

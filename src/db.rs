@@ -1,4 +1,11 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::hash::Hasher;
+
+use crate::table::Table;
 use crate::utils::rnd_string;
+use crate::utils::should_skip;
+use core::hash::Hash;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::ConnectOptions;
 use sqlx::PgConnection;
@@ -79,7 +86,7 @@ pub struct UserDefinedEnum {
     enum_values: Vec<String>,
 }
 
-#[derive(sqlx::FromRow, Debug)]
+#[derive(sqlx::FromRow, Debug, Clone)]
 pub struct DbTable {
     pub schema: String,
     pub name: String,
@@ -92,12 +99,36 @@ pub struct DbExtensionTable {
     pub extension_name: String,
 }
 
+#[derive(sqlx::FromRow, Clone)]
+pub struct DbTableRelations {
+    pub table_schema: String,
+    pub constraint_name: String,
+    pub table_name: String,
+    pub column_name: String,
+    pub foreign_table_schema: String,
+    pub foreign_table_name: String,
+    pub foreign_column_name: String,
+}
+
+impl PartialEq for DbTableRelations {
+    fn eq(&self, other: &Self) -> bool {
+        self.table_schema == other.table_schema && self.table_name == other.table_name
+    }
+}
+impl Eq for DbTableRelations {}
+impl Hash for DbTableRelations {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.table_schema.hash(state);
+        self.table_name.hash(state);
+    }
+}
+
 #[derive(sqlx::FromRow)]
 pub struct PgVersion {
     pub regexp_matches: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Db {
     pub host: String,
     pub user: String,
@@ -169,14 +200,26 @@ impl Db {
         Ok(())
     }
 
-    pub async fn get_tables(&self) -> anyhow::Result<Vec<DbTable>> {
+    pub async fn get_tables(&self, skip_tables: &HashSet<String>) -> anyhow::Result<Vec<Table>> {
         let mut client = self.connect().await?;
 
         let  res =
             sqlx::query_as::<_, DbTable>("SELECT schemaname as schema, tablename as name FROM pg_catalog.pg_tables WHERE schemaname NOT LIKE 'pg_%' AND schemaname != 'information_schema'")
                 .fetch_all(&mut client).await?;
 
-        Ok(res)
+        let relations = self.get_table_relations().await?;
+
+        let mut rows: Vec<Table> = res
+            .into_iter()
+            .filter(|r| !should_skip(r.schema.as_str(), r.name.as_str(), &skip_tables))
+            .map(|v| Table::new(v.name, v.schema, self.clone(), None, None, None))
+            .collect();
+
+        populate_foreign_keys(&mut rows, &relations, self.clone());
+
+        println!("{:#?}", rows);
+
+        Ok(rows)
     }
 
     pub async fn get_extension_tables(&self) -> anyhow::Result<Vec<DbExtensionTable>> {
@@ -185,6 +228,34 @@ impl Db {
         let res = sqlx::query_as::<_, DbExtensionTable>(PG_EXTENSION_TABLES_QUERY)
             .fetch_all(&mut client)
             .await?;
+
+        Ok(res)
+    }
+
+    pub async fn get_table_relations(&self) -> anyhow::Result<Vec<DbTableRelations>> {
+        let mut client = self.connect().await?;
+
+        let res = sqlx::query_as::<_, DbTableRelations>(
+            "
+            SELECT
+                tc.table_schema,
+                tc.constraint_name,
+                tc.table_name,
+                kcu.column_name,
+                ccu.table_schema AS foreign_table_schema,
+                ccu.table_name AS foreign_table_name,
+                ccu.column_name AS foreign_column_name
+            FROM information_schema.table_constraints AS tc
+            JOIN information_schema.key_column_usage AS kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage AS ccu
+                ON ccu.constraint_name = tc.constraint_name
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+        ",
+        )
+        .fetch_all(&mut client)
+        .await?;
 
         Ok(res)
     }
@@ -241,5 +312,27 @@ impl Db {
             .await?;
 
         Ok(())
+    }
+}
+
+pub fn populate_foreign_keys(tables: &mut Vec<Table>, relations: &[DbTableRelations], db_conn: Db) {
+    for table in tables.iter_mut() {
+        let foreign_keys_for_table: Vec<Table> = relations
+            .iter()
+            .filter(|r| r.table_name == table.name && r.table_schema == table.schema)
+            .map(|r| Table {
+                name: r.foreign_table_name.clone(),
+                schema: r.foreign_table_schema.clone(),
+                is_extension: None, // Assuming you have a way to set this
+                db_conn: db_conn.clone(),
+                full_name: format!("{}.{}", r.foreign_table_schema, r.foreign_table_name), // Adjust this format as needed
+                data_file_path: None, // Assuming you have a way to set this
+                foreign_keys: None,   // This could be recursively populated if needed
+            })
+            .collect();
+
+        if !foreign_keys_for_table.is_empty() {
+            table.foreign_keys = Some(foreign_keys_for_table);
+        }
     }
 }

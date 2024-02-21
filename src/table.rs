@@ -8,13 +8,15 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::io::AsyncWriteExt;
 
+#[derive(Clone, Debug)]
 pub struct Table {
     pub name: String,
     pub schema: String,
     pub is_extension: Option<bool>,
-    db_conn: Db,
+    pub db_conn: Db,
     pub full_name: String,
     pub data_file_path: Option<PathBuf>,
+    pub foreign_keys: Option<Vec<Table>>,
 }
 
 impl Table {
@@ -24,6 +26,7 @@ impl Table {
         db_conn: Db,
         is_extension: Option<bool>,
         data_file_path: Option<PathBuf>,
+        foreign_keys: Option<Vec<Table>>,
     ) -> Self {
         Table {
             name: name.clone(),
@@ -32,6 +35,7 @@ impl Table {
             db_conn,
             full_name: format!("{}.{}", schema, name),
             data_file_path,
+            foreign_keys,
         }
     }
 
