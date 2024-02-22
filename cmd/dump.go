@@ -42,7 +42,7 @@ func CopyData(root string, table *db.Table) error {
 }
 
 func Dump(ctx context.Context, cmd *cli.Command) error {
-	pg, err := db.NewDb(context.Background(), "postgres", "postgres", "localhost", 5432, "torch-labs")
+	pg, err := db.NewDb(context.Background(), "postgres", "postgres", "localhost", 5432, "pg")
 
 	if err != nil {
 		return err
