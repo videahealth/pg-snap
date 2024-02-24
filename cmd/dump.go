@@ -12,6 +12,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
+	"github.com/videahealth/pg-snap/internal/utils"
 )
 
 func ParseSkipTables(st string) map[string]struct{} {
@@ -24,25 +25,40 @@ func ParseSkipTables(st string) map[string]struct{} {
 	return tableSet
 }
 
-func CopyData(root string, table *db.Table) error {
-	dirPath := filepath.Join(root, table.Name)
+func ExtractAndRemoveFKConstraints(input string) (string, string, error) {
+	lines := strings.Split(input, "\n")
 
-	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-		return err
+	var remainingContent string
+	var extractedContent string
+	capture := false
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "-- Name:") {
+			if strings.Contains(line, "Type: FK CONSTRAINT") {
+				capture = true
+			} else {
+				capture = false
+				remainingContent += line + "\n"
+			}
+		}
+
+		if capture {
+			extractedContent += line + "\n"
+		} else if !strings.HasPrefix(line, "-- Name:") {
+			remainingContent += line + "\n"
+		}
 	}
 
-	path := filepath.Join(dirPath, "data.csv")
-
-	err := table.CopyOut(path)
-	if err != nil {
-		return err
+	if extractedContent == "" && remainingContent == "" {
+		return "", "", errors.New("no content processed")
 	}
 
-	return nil
+	return extractedContent, remainingContent, nil
 }
 
 func Dump(ctx context.Context, cmd *cli.Command) error {
-	pg, err := db.NewDb(context.Background(), "postgres", "postgres", "localhost", 5432, "pg")
+	dbParams := *utils.ParseFromCli(cmd)
+	pg, err := db.NewDb(context.Background(), dbParams)
 
 	if err != nil {
 		return err
@@ -56,36 +72,20 @@ func Dump(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	v := pg.GetVersion()
-	dump, err := pgcommand.NewDump(pg)
-	res := dump.GetVersion(
-		pgcommand.ExecOptions{
-			StreamPrint:       true,
-			StreamDestination: os.Stdout,
-		},
-	)
+	pgDbVersion := pg.GetVersion()
+	pgDumpVersion, err := pgcommand.GetPgCmdVersion("pg_dump")
 
 	if err != nil {
 		return err
 	}
 
-	dbVersion, err := GetMajorVersion(v)
-
-	if err != nil {
-		return err
-	}
-
-	if !strings.Contains(res, dbVersion) {
+	if err := utils.ValidateDbVersion(pgDbVersion, pgDumpVersion); err != nil {
 		return errors.New("major postgres version does not match pg_dump")
-	}
-
-	if err != nil {
-		return err
 	}
 
 	root := "./data-dump"
 
-	concurrencyLimit := make(chan struct{}, 4)
+	concurrencyLimit := make(chan struct{}, 5)
 
 	var wg sync.WaitGroup
 
@@ -94,33 +94,80 @@ func Dump(ctx context.Context, cmd *cli.Command) error {
 
 		concurrencyLimit <- struct{}{}
 
-		go func(tbl *db.Table) {
+		go func(tbl db.Table) {
 			defer wg.Done()
 
-			if err := CopyData(root, tbl); err != nil {
+			dirPath := filepath.Join(root, tbl.Details.Name)
+
+			if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+				fmt.Printf("Error copying for table %s: %s", tbl.Details.Identifier, err)
+			}
+
+			path := filepath.Join(dirPath, "data.csv")
+			dataPath := filepath.Join(dirPath, "table.bin")
+
+			rows, err := tbl.CopyOut(path)
+			if err != nil {
 				fmt.Printf("Error copying: %s\n", err)
 			}
 
+			fmt.Printf("COPIED %d rows from %s\n", rows, tbl.Details.Identifier)
+
+			err = tbl.SerializeTable(dataPath)
+
+			if err != nil {
+				fmt.Printf("Error serializing: %s\n", err)
+			}
+
+			if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+				fmt.Printf("Error serializing data for table %s: %s", tbl.Details.Identifier, err)
+			}
+
 			<-concurrencyLimit
-		}(&table)
+		}(table)
 	}
 
 	wg.Wait()
 
-	path, err := filepath.Abs(filepath.Join(root, "ddl.sql"))
+	fmt.Println("Getting DDL")
+
+	ddlPath, err := filepath.Abs(filepath.Join(root, "ddl.sql"))
+	if err != nil {
+		return err
+	}
+	fkPath, err := filepath.Abs(filepath.Join(root, "fk_constraints.sql"))
+	if err != nil {
+		return err
+	}
+	ddlFile, err := os.OpenFile(ddlPath, os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		return err
+	}
+	fkFile, err := os.OpenFile(fkPath, os.O_CREATE|os.O_RDWR, 0666)
 	if err != nil {
 		return err
 	}
 
-	_, err = os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0666)
+	dumpOutput, err := pgcommand.DumpDb(&dbParams)
 
 	if err != nil {
 		return err
 	}
 
-	r := dump.DumpDb(path)
+	fks, ddl, err := ExtractAndRemoveFKConstraints(dumpOutput)
 
-	fmt.Println(r)
+	if err != nil {
+		return err
+	}
+
+	_, err = ddlFile.WriteString(ddl)
+	if err != nil {
+		return err
+	}
+	_, err = fkFile.WriteString(fks)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

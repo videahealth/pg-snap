@@ -1,13 +1,13 @@
 package pgcommand
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
-	"time"
+	"path/filepath"
 
-	"github.com/videahealth/pg-snap/internal/db"
+	"github.com/videahealth/pg-snap/internal/utils"
 )
 
 var (
@@ -16,138 +16,84 @@ var (
 	pgDumpStdOpts = []string{"--schema-only"}
 )
 
-type Dump struct {
-	db *db.Db
+func GetPgCommandFlags(params *utils.DbParams) []string {
+	var options []string
 
-	// Verbose mode
-	Verbose bool
-	// Path: setup path dump out
-	Path string
-	// Format: output file format (custom, directory, tar, plain text (default))
-	Format *string
-	// Extra pg_dump x.FullOptions
-	// e.g []string{"--inserts"}
-	Options []string
-
-	IgnoreTableData []string
-
-	// fileName: output file name
-	fileName string
-}
-
-func NewDump(db *db.Db) (*Dump, error) {
-	if !CommandExist(PGDumpCmd) {
-		return nil, &ErrCommandNotFound{Command: PGDumpCmd}
+	if params.Db != "" {
+		options = append(options, fmt.Sprintf(`--dbname=%v`, params.Db))
 	}
 
-	return &Dump{Options: pgDumpStdOpts, db: db}, nil
+	if params.Host != "" {
+		options = append(options, fmt.Sprintf(`--host=%v`, params.Host))
+	}
+
+	if params.Port != 0 {
+		options = append(options, fmt.Sprintf(`--port=%v`, params.Port))
+	}
+
+	if params.Username != "" {
+		options = append(options, fmt.Sprintf(`--username=%v`, params.Username))
+	}
+
+	return options
 }
 
-func (x *Dump) DumpDb(file string) Result {
-	result := Result{Mine: "application/x-tar"}
-	result.File = file
-	options := append(x.dumpOptions(), fmt.Sprintf("-f%s", file))
+func DumpDb(params *utils.DbParams) (string, error) {
+	flags := GetPgCommandFlags(params)
 
-	result.FullCommand = strings.Join(options, " ")
+	options := pgDumpStdOpts
+	options = append(options, flags...)
+
 	cmd := exec.Command(PGDumpCmd, options...)
-	cmd.Env = append(os.Environ(), x.db.EnvPassword)
+	cmd.Env = append(os.Environ(), fmt.Sprintf(`PGPASSWORD=%v`, params.Password))
 
-	// Use CombinedOutput to capture both stdout and stderr
 	output, err := cmd.CombinedOutput()
-	fmt.Println(string(output), err) // Ensure to convert output to string for printing
 
 	if err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			// Note: Now CmdOutput should correctly include stderr content if any
-			result.Error = &ResultError{Err: err, ExitCode: exitError.ExitCode(), CmdOutput: string(output)}
-		} else {
-			result.Error = &ResultError{Err: err, CmdOutput: string(output)}
-		}
+		return "", err
 	}
 
-	result.Output = string(output)
-
-	return result
+	return string(output), nil
 }
 
-func (x *Dump) GetVersion(opts ExecOptions) string {
+func ExecuteDDLFile(params *utils.DbParams, path string) error {
+	fullPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	cmd := exec.Command("psql",
+		"-U", params.Username,
+		"-h", params.Host,
+		"-d", params.Db,
+		"-f", fullPath,
+	)
+	cmd.Env = append(os.Environ(), "PATH=/usr/local/bin:"+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("PGPASSWORD=%s", params.Password))
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("psql command failed: %w; output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+func GetPgCmdVersion(cmdStr string) (string, error) {
 	result := Result{Mine: "application/x-tar"}
 
-	cmd := exec.Command(PGDumpCmd, "--version")
+	cmd := exec.Command(cmdStr, "--version")
 
 	output, err := cmd.Output()
 
 	result.Output = string(output)
 
 	if err != nil {
-		result.Error = &ResultError{Err: err, CmdOutput: string(output)}
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", errors.New("command pg_dump does not exist, please first install it")
+		}
+		return "", err
 	}
 
-	if exitError, ok := err.(*exec.ExitError); ok {
-		result.Error = &ResultError{Err: err, ExitCode: exitError.ExitCode(), CmdOutput: result.Output}
-	}
-
-	version := result.Output
-
-	return version
-}
-
-func (x *Dump) ResetOptions() {
-	x.Options = []string{}
-}
-
-func (x *Dump) EnableVerbose() {
-	x.Verbose = true
-}
-
-func (x *Dump) SetFileName(filename string) {
-	x.fileName = filename
-}
-
-func (x *Dump) GetFileName() string {
-	if x.fileName == "" {
-		// Use default file name
-		x.fileName = x.newFileName()
-	}
-
-	return x.fileName
-}
-
-func (x *Dump) SetupFormat(f string) {
-	x.Format = &f
-}
-
-func (x *Dump) SetPath(path string) {
-	x.Path = path
-}
-
-func (x *Dump) newFileName() string {
-	return fmt.Sprintf(`%v_%v.sql.tar.gz`, x.db.DbName, time.Now().Unix())
-}
-
-func (x *Dump) dumpOptions() []string {
-	options := x.Options
-	options = append(options, x.db.Parse()...)
-
-	// if x.Format != nil {
-	// 	options = append(options, fmt.Sprintf(`-F%v`, *x.Format))
-	// } else {
-	// 	options = append(options, fmt.Sprintf(`-F%v`, pgDumpDefaultFormat))
-	// }
-	if x.Verbose {
-		options = append(options, "-v")
-	}
-	if len(x.IgnoreTableData) > 0 {
-		options = append(options, x.IgnoreTableDataToString()...)
-	}
-
-	return options
-}
-func (x *Dump) IgnoreTableDataToString() []string {
-	t := []string{}
-	for _, tables := range x.IgnoreTableData {
-		t = append(t, "--exclude-table-data="+tables)
-	}
-
-	return t
+	return string(output), nil
 }
