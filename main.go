@@ -6,7 +6,8 @@ import (
 	"os"
 
 	"github.com/urfave/cli/v3"
-	"github.com/videahealth/pg-snap/cmd"
+	"github.com/videahealth/pg-snap/cmd/dump"
+	"github.com/videahealth/pg-snap/cmd/restore"
 )
 
 func main() {
@@ -46,13 +47,13 @@ func main() {
 			{
 				Name:   "dump",
 				Usage:  "add a task to the list",
-				Action: cmd.Dump,
+				Action: dump.Run,
 				Flags:  dumpFlags,
 			},
 			{
 				Name:   "restore",
 				Usage:  "restore db",
-				Action: cmd.Restore,
+				Action: restore.Run,
 				Flags:  dbFlags,
 			},
 		},

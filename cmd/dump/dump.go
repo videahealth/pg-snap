@@ -1,4 +1,4 @@
-package cmd
+package dump
 
 import (
 	"context"
@@ -16,6 +16,11 @@ import (
 )
 
 func ParseSkipTables(st string) map[string]struct{} {
+
+	if st == "" {
+		return make(map[string]struct{})
+	}
+
 	parts := strings.Split(st, ",")
 	tableSet := make(map[string]struct{})
 	for _, part := range parts {
@@ -56,7 +61,7 @@ func ExtractAndRemoveFKConstraints(input string) (string, string, error) {
 	return extractedContent, remainingContent, nil
 }
 
-func Dump(ctx context.Context, cmd *cli.Command) error {
+func Run(ctx context.Context, cmd *cli.Command) error {
 	dbParams := *utils.ParseFromCli(cmd)
 	pg, err := db.NewDb(context.Background(), dbParams)
 

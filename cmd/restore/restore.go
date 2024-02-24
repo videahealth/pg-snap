@@ -1,4 +1,4 @@
-package cmd
+package restore
 
 import (
 	"context"
@@ -88,7 +88,7 @@ func readFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTabl
 	return nil
 }
 
-func Restore(ctx context.Context, cmd *cli.Command) error {
+func Run(ctx context.Context, cmd *cli.Command) error {
 	dbParams := *utils.ParseFromCli(cmd)
 	pg, err := db.NewDb(context.Background(), dbParams)
 

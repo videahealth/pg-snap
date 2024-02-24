@@ -80,13 +80,10 @@ func ExecuteDDLFile(params *utils.DbParams, path string) error {
 }
 
 func GetPgCmdVersion(cmdStr string) (string, error) {
-	result := Result{Mine: "application/x-tar"}
 
 	cmd := exec.Command(cmdStr, "--version")
 
 	output, err := cmd.Output()
-
-	result.Output = string(output)
 
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
