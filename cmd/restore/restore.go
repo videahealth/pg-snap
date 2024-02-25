@@ -208,7 +208,7 @@ func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
 			defer wg.Done()
 
 			isExtention := IsExtTable(extTables, &tbl)
-			dirPath := filepath.Join(root, tbl.Details.Name, "data.csv")
+			dirPath := filepath.Join(root, tbl.Details.Display, "data.csv")
 
 			if err := ReadFromFileAndWriteToDb(dirPath, &tbl, pg, isExtention, &ops, total); err != nil {
 				log.Error("Error copying for table %s: %s", tbl.Details.Display, err)

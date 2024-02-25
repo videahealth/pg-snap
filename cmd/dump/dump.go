@@ -148,7 +148,7 @@ func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
 
 			log.Debug(utils.SprintfNoNewlines("COPYING data from table %s", tbl.Details.Display))
 
-			dirPath := filepath.Join(root, tbl.Details.Name)
+			dirPath := filepath.Join(root, tbl.Details.Display)
 
 			if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
 				log.Error("Error copying for table %s: %s", tbl.Details.Display, err)
