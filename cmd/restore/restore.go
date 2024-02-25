@@ -156,10 +156,6 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	fmt.Println(root)
-
-	fmt.Println("loading pg tables")
-
 	tables, err := LoadPgTables(root, pg)
 
 	if err != nil {
