@@ -32,7 +32,12 @@ type DbParams struct {
 	Port     int32
 }
 
-func ParseFromCli(cmd *cli.Command) *DbParams {
+type ProgramParams struct {
+	Concurrency int32
+	TarFilePath string
+}
+
+func ParseDbParamsFromCli(cmd *cli.Command) *DbParams {
 	port, err := strconv.ParseInt(cmd.String("port"), 10, 32)
 	if err != nil {
 		panic(err)
@@ -44,6 +49,18 @@ func ParseFromCli(cmd *cli.Command) *DbParams {
 		Host:     cmd.String("host"),
 		Db:       cmd.String("db"),
 		Port:     int32(port),
+	}
+}
+
+func ParseProgramParamsFromCli(cmd *cli.Command) *ProgramParams {
+	c, err := strconv.ParseInt(cmd.String("concurrency"), 10, 32)
+	if err != nil {
+		panic(err)
+	}
+
+	return &ProgramParams{
+		Concurrency: int32(c),
+		TarFilePath: cmd.String("file"),
 	}
 }
 
@@ -94,4 +111,13 @@ func RandomString(n int) string {
 		s[i] = letters[rand.Intn(len(letters))]
 	}
 	return string(s)
+}
+
+func SprintfNoNewlines(format string, a ...interface{}) string {
+	result := fmt.Sprintf(format, a...)
+
+	result = strings.ReplaceAll(result, "\n", "")
+	result = strings.ReplaceAll(result, "\r", "")
+
+	return result
 }

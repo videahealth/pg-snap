@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
+	"github.com/charmbracelet/log"
 	"github.com/urfave/cli/v3"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
@@ -27,7 +29,7 @@ func LoadPgTables(dirPath string, dbConn *db.Db) ([]db.Table, error) {
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			fullPath := filepath.Join(dirPath, entry.Name(), "table.bin")
+			fullPath := filepath.Join(dirPath, "table.bin")
 
 			pgTable, err := db.DeserializeTable(fullPath, dbConn)
 			if err != nil {
@@ -50,13 +52,28 @@ func IsExtTable(exts []db.ExtTable, table *db.Table) bool {
 	return false
 }
 
-func readFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTable bool) error {
+func DecompressDir(filePath string, out string) error {
+	file, err := os.Open(filePath)
+
+	if err != nil {
+		return err
+	}
+
+	err = utils.Decompress(file, out)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ReadFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTable bool, ops *atomic.Uint64, total int) error {
 	fullPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	// fullTableName := fmt.Sprintf("%s.%s", table.Details.Schema, table.Details.Name)
 	tableToCopy := table.Details.Name
 	var schemaToCopy *string = &table.Details.Schema
 	isTmpTable := false
@@ -71,13 +88,21 @@ func readFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTabl
 		isTmpTable = true
 	}
 
-	fmt.Printf("Copying table %s.%s\n", table.Details.Schema, table.Details.Name)
+	log.Debug(utils.SprintfNoNewlines("COPYING data from table %s", table.Details.Display))
 
 	rowsCopied, err := table.CopyIn(fullPath, tableToCopy, schemaToCopy)
 	if err != nil {
 		return fmt.Errorf("error copying for table %s.%s: %w", table.Details.Schema, table.Details.Name, err)
 	}
-	fmt.Printf("Copied %d rows from %s.%s\n", rowsCopied, table.Details.Schema, table.Details.Name)
+
+	ops.Add(1)
+	progress := ops.Load()
+
+	log.Info(utils.SprintfNoNewlines("COPIED %s rows from %s",
+		utils.Colored(utils.Green, fmt.Sprint(rowsCopied)),
+		utils.Colored(utils.Yellow, table.Details.Display)),
+		"progress",
+		utils.SprintfNoNewlines("%d / %d", progress, total))
 
 	if isTmpTable {
 		if _, err := pg.CopyFromTempTable(table.Details.Identifier, tableToCopy); err != nil {
@@ -89,7 +114,20 @@ func readFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTabl
 }
 
 func Run(ctx context.Context, cmd *cli.Command) error {
-	dbParams := *utils.ParseFromCli(cmd)
+	dbParams := *utils.ParseDbParamsFromCli(cmd)
+	programParams := *utils.ParseProgramParamsFromCli(cmd)
+
+	var inputFile string
+
+	if programParams.TarFilePath == "" {
+		inputFile = fmt.Sprintf("./%s.tar.gz", dbParams.Db)
+	} else {
+		if _, err := os.Stat(inputFile); errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("given input file %s does not exist", inputFile)
+		}
+		inputFile = programParams.TarFilePath
+	}
+
 	pg, err := db.NewDb(context.Background(), dbParams)
 
 	if err != nil {
@@ -107,7 +145,21 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return errors.New("major postgres version does not match pg_dump")
 	}
 
-	root := "./data-dump"
+	root, err := os.MkdirTemp("", "")
+	defer os.RemoveAll(root)
+
+	if err != nil {
+		return err
+	}
+
+	if err = DecompressDir(inputFile, "."); err != nil {
+		return err
+
+	}
+
+	fmt.Println(root)
+
+	fmt.Println("loading pg tables")
 
 	tables, err := LoadPgTables(root, pg)
 
@@ -135,8 +187,11 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	concurrencyLimit := make(chan struct{}, 5)
+	concurrencyLimit := make(chan struct{}, programParams.Concurrency)
 	var wg sync.WaitGroup
+
+	var ops atomic.Uint64
+	total := len(tables)
 
 	for _, table := range tables {
 		wg.Add(1)
@@ -149,8 +204,8 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 			isExtention := IsExtTable(extTables, &tbl)
 			dirPath := filepath.Join(root, tbl.Details.Name, "data.csv")
 
-			if err := readFromFileAndWriteToDb(dirPath, &tbl, pg, isExtention); err != nil {
-				fmt.Println(err)
+			if err := ReadFromFileAndWriteToDb(dirPath, &tbl, pg, isExtention, &ops, total); err != nil {
+				log.Error("Error copying for table %s: %s", tbl.Details.Display, err)
 			}
 
 			<-concurrencyLimit
@@ -158,7 +213,7 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 	}
 	wg.Wait()
 
-	fmt.Println("Executing table DDLs")
+	log.Info("Loading database DDL")
 
 	fksPath, err := filepath.Abs(filepath.Join(root, "fk_constraints.sql"))
 	if err != nil {
@@ -169,7 +224,7 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	fmt.Println("Writing SEQ")
+	log.Info("Writing table sequences")
 
 	if err := pg.WriteTableSequences(); err != nil {
 		return err

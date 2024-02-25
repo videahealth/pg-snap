@@ -8,9 +8,11 @@ import (
 	"github.com/urfave/cli/v3"
 	"github.com/videahealth/pg-snap/cmd/dump"
 	"github.com/videahealth/pg-snap/cmd/restore"
+	"github.com/videahealth/pg-snap/internal/utils"
 )
 
 func main() {
+	utils.InitColor()
 	dbFlags := []cli.Flag{
 		&cli.StringFlag{
 			Name:     "username",
@@ -37,10 +39,21 @@ func main() {
 			Required: true,
 			Usage:    "NA",
 		},
+		&cli.StringFlag{
+			Name:    "concurrency",
+			Aliases: []string{"c"},
+			Value:   "5",
+		},
 	}
 	dumpFlags := append(dbFlags, &cli.StringFlag{
 		Name:  "skip-tables",
 		Usage: "public.*,myschema.Table",
+	})
+	restoreFlags := append(dbFlags, &cli.StringFlag{
+		Name:    "file",
+		Aliases: []string{"f"},
+		Usage:   "file",
+		Value:   "",
 	})
 	cmd := &cli.Command{
 		Commands: []*cli.Command{
@@ -54,7 +67,7 @@ func main() {
 				Name:   "restore",
 				Usage:  "restore db",
 				Action: restore.Run,
-				Flags:  dbFlags,
+				Flags:  restoreFlags,
 			},
 		},
 	}

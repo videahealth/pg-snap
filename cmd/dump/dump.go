@@ -1,14 +1,18 @@
 package dump
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/charmbracelet/log"
 	"github.com/urfave/cli/v3"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
@@ -61,8 +65,28 @@ func ExtractAndRemoveFKConstraints(input string) (string, string, error) {
 	return extractedContent, remainingContent, nil
 }
 
+func CompressDir(dir string, outFile string) error {
+	var buf bytes.Buffer
+	err := utils.Compress(dir, &buf)
+	if err != nil {
+		return err
+	}
+
+	fileToWrite, err := os.OpenFile(outFile, os.O_CREATE|os.O_RDWR, os.FileMode(0600))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(fileToWrite, &buf); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func Run(ctx context.Context, cmd *cli.Command) error {
-	dbParams := *utils.ParseFromCli(cmd)
+	dbParams := *utils.ParseDbParamsFromCli(cmd)
+	programParams := *utils.ParseProgramParamsFromCli(cmd)
+
 	pg, err := db.NewDb(context.Background(), dbParams)
 
 	if err != nil {
@@ -84,15 +108,26 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	log.Info(utils.SprintfNoNewlines("Remote postgres version: %s, local version: %s", pgDbVersion, pgDumpVersion))
+
 	if err := utils.ValidateDbVersion(pgDbVersion, pgDumpVersion); err != nil {
 		return errors.New("major postgres version does not match pg_dump")
 	}
 
-	root := "./data-dump"
+	root, err := os.MkdirTemp("", "data-dump")
+	defer os.RemoveAll(root)
 
-	concurrencyLimit := make(chan struct{}, 5)
+	if err != nil {
+		return err
+	}
+
+	log.Info("Running with", "concurrency", programParams.Concurrency)
+
+	concurrencyLimit := make(chan struct{}, programParams.Concurrency)
 
 	var wg sync.WaitGroup
+	var ops atomic.Uint64
+	total := len(tables)
 
 	for _, table := range tables {
 		wg.Add(1)
@@ -102,10 +137,12 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		go func(tbl db.Table) {
 			defer wg.Done()
 
+			log.Debug(utils.SprintfNoNewlines("COPYING data from table %s", tbl.Details.Display))
+
 			dirPath := filepath.Join(root, tbl.Details.Name)
 
 			if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-				fmt.Printf("Error copying for table %s: %s", tbl.Details.Identifier, err)
+				log.Error("Error copying for table %s: %s", tbl.Details.Display, err)
 			}
 
 			path := filepath.Join(dirPath, "data.csv")
@@ -113,20 +150,27 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 
 			rows, err := tbl.CopyOut(path)
 			if err != nil {
-				fmt.Printf("Error copying: %s\n", err)
+				log.Error("Error copying data for table %s: %w", tbl.Details.Display, err)
 			}
-
-			fmt.Printf("COPIED %d rows from %s\n", rows, tbl.Details.Identifier)
 
 			err = tbl.SerializeTable(dataPath)
 
 			if err != nil {
-				fmt.Printf("Error serializing: %s\n", err)
+				log.Error("Error serializing data for table %s: %w", tbl.Details.Display, err)
 			}
 
 			if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-				fmt.Printf("Error serializing data for table %s: %s", tbl.Details.Identifier, err)
+				log.Error("Error serializing data for table %s: %s", tbl.Details.Display, err)
 			}
+
+			ops.Add(1)
+			progress := ops.Load()
+
+			log.Info(utils.SprintfNoNewlines("COPIED %s rows from %s",
+				utils.Colored(utils.Green, fmt.Sprint(rows)),
+				utils.Colored(utils.Yellow, tbl.Details.Display)),
+				"progress",
+				utils.SprintfNoNewlines("%d / %d", progress, total))
 
 			<-concurrencyLimit
 		}(table)
@@ -134,7 +178,7 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 
 	wg.Wait()
 
-	fmt.Println("Getting DDL")
+	log.Info("Extracting database DDL")
 
 	ddlPath, err := filepath.Abs(filepath.Join(root, "ddl.sql"))
 	if err != nil {
@@ -171,6 +215,10 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 	}
 	_, err = fkFile.WriteString(fks)
 	if err != nil {
+		return err
+	}
+
+	if err = CompressDir(root, fmt.Sprintf("./%s.tar.gz", dbParams.Db)); err != nil {
 		return err
 	}
 

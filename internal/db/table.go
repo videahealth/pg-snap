@@ -14,6 +14,7 @@ type TableInfo struct {
 	Name       string
 	Schema     string
 	Identifier string
+	Display    string
 }
 
 type Table struct {
@@ -45,11 +46,14 @@ func readFirstLine(file *os.File) (string, error) {
 
 func NewTable(name string, schema string, db *Db) Table {
 	identifer := fmt.Sprintf("\"%s\".\"%s\"", schema, name)
+	display := fmt.Sprintf("%s.%s", schema, name)
+
 	return Table{
 		Details: &TableInfo{
 			Name:       name,
 			Schema:     schema,
 			Identifier: identifer,
+			Display:    display,
 		},
 		db: db,
 	}
