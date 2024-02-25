@@ -7,11 +7,8 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/urfave/cli/v3"
 )
 
 func GetMajorVersion(s string) (string, error) {
@@ -22,46 +19,6 @@ func GetMajorVersion(s string) (string, error) {
 	}
 
 	return "", errors.New("unable to parse major version")
-}
-
-type DbParams struct {
-	Username string
-	Password string
-	Host     string
-	Db       string
-	Port     int32
-}
-
-type ProgramParams struct {
-	Concurrency int32
-	TarFilePath string
-}
-
-func ParseDbParamsFromCli(cmd *cli.Command) *DbParams {
-	port, err := strconv.ParseInt(cmd.String("port"), 10, 32)
-	if err != nil {
-		panic(err)
-	}
-
-	return &DbParams{
-		Username: cmd.String("username"),
-		Password: cmd.String("password"),
-		Host:     cmd.String("host"),
-		Db:       cmd.String("db"),
-		Port:     int32(port),
-	}
-}
-
-func ParseProgramParamsFromCli(cmd *cli.Command) *ProgramParams {
-	c, err := strconv.ParseInt(cmd.String("concurrency"), 10, 32)
-	if err != nil {
-		panic(err)
-	}
-
-	return &ProgramParams{
-		Concurrency: int32(c),
-		TarFilePath: cmd.String("file"),
-	}
 }
 
 func ValidateDbVersion(pgDbVersion string, pgDumpVersion string) error {

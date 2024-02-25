@@ -6,14 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 
 	"github.com/videahealth/pg-snap/internal/utils"
-)
-
-var (
-	// PGDumpCmd is the path to the `pg_dump` executable
-	PGDumpCmd     = "pg_dump"
-	pgDumpStdOpts = []string{"--schema-only"}
 )
 
 func GetPgCommandFlags(params *utils.DbParams) []string {
@@ -41,10 +36,10 @@ func GetPgCommandFlags(params *utils.DbParams) []string {
 func DumpDb(params *utils.DbParams) (string, error) {
 	flags := GetPgCommandFlags(params)
 
-	options := pgDumpStdOpts
+	options := []string{"--schema-only"}
 	options = append(options, flags...)
 
-	cmd := exec.Command(PGDumpCmd, options...)
+	cmd := exec.Command("pg_dump", options...)
 	cmd.Env = append(os.Environ(), fmt.Sprintf(`PGPASSWORD=%v`, params.Password))
 
 	output, err := cmd.CombinedOutput()
@@ -67,6 +62,7 @@ func ExecuteDDLFile(params *utils.DbParams, path string) error {
 		"-h", params.Host,
 		"-d", params.Db,
 		"-f", fullPath,
+		"-p", strconv.FormatInt(int64(params.Port), 10),
 	)
 	cmd.Env = append(os.Environ(), "PATH=/usr/local/bin:"+os.Getenv("PATH"))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("PGPASSWORD=%s", params.Password))

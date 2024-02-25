@@ -117,15 +117,24 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 	dbParams := *utils.ParseDbParamsFromCli(cmd)
 	programParams := *utils.ParseProgramParamsFromCli(cmd)
 
+	if err := RunCmd(dbParams, programParams); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
+
 	var inputFile string
 
 	if programParams.TarFilePath == "" {
 		inputFile = fmt.Sprintf("./%s.tar.gz", dbParams.Db)
 	} else {
+		inputFile = programParams.TarFilePath
 		if _, err := os.Stat(inputFile); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("given input file %s does not exist", inputFile)
 		}
-		inputFile = programParams.TarFilePath
 	}
 
 	pg, err := db.NewDb(context.Background(), dbParams)
@@ -162,7 +171,9 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	utils.AskForConfirmation(fmt.Sprintf("Warning! this operation will drop the database %s, do you wish to continue?", dbParams.Db))
+	if programParams.AskForConfirmation {
+		utils.AskForConfirmation(fmt.Sprintf("Warning! this operation will drop the database %s, do you wish to continue?", dbParams.Db))
+	}
 
 	if err := pg.DropAndCreateDb(); err != nil {
 		return err

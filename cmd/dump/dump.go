@@ -87,13 +87,22 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 	dbParams := *utils.ParseDbParamsFromCli(cmd)
 	programParams := *utils.ParseProgramParamsFromCli(cmd)
 
+	if err := RunCmd(dbParams, programParams); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
+
 	pg, err := db.NewDb(context.Background(), dbParams)
 
 	if err != nil {
 		return err
 	}
 
-	skipTablesStr := cmd.String("skip-tables")
+	skipTablesStr := programParams.SkipTables
 	skipTables := ParseSkipTables(skipTablesStr)
 	tables, err := pg.GetAllTables(skipTables)
 

@@ -53,17 +53,17 @@ setval(col_sequence, coalesce(max_val, 1)) --<< this will change the sequence
 from maxvals;
 `
 
+// Determines if the given table name and schema should be skipped based on the given set of skipTables.
+// Ex skip tables: public.* (skip entire public schema), public.mytable (skip only mytable), public.myt* (skip all tables prefixed with myt).
 func ShouldSkip(tableSchema, tableName string, skipTables map[string]struct{}) bool {
 	fullName := strings.ToLower(tableSchema + "." + tableName)
 	schemaWildcard := strings.ToLower(tableSchema + ".*")
 
-	// Convert skipTables keys to lowercase for case-insensitive comparison
 	lowerSkipTables := make(map[string]struct{})
 	for k := range skipTables {
 		lowerSkipTables[strings.ToLower(k)] = struct{}{}
 	}
 
-	// Check if the full table name or schema wildcard is in the skip list
 	_, fullMatch := lowerSkipTables[fullName]
 	_, wildcardMatch := lowerSkipTables[schemaWildcard]
 
@@ -71,12 +71,10 @@ func ShouldSkip(tableSchema, tableName string, skipTables map[string]struct{}) b
 		return true
 	}
 
-	// Check for prefix matches with table name substrings and wildcard pattern matches
 	for skipTable := range lowerSkipTables {
-		// Check for exact prefix match or wildcard pattern match
 		if strings.HasPrefix(skipTable, strings.ToLower(tableSchema)+".") {
-			trimmed := skipTable[len(strings.ToLower(tableSchema)+"."):] // Remove the prefix
-			pattern := strings.Replace(trimmed, "*", "", -1)             // Remove the wildcard for prefix comparison
+			trimmed := skipTable[len(strings.ToLower(tableSchema)+"."):]
+			pattern := strings.Replace(trimmed, "*", "", -1)
 
 			if strings.HasPrefix(strings.ToLower(tableName), pattern) {
 				return true
@@ -104,6 +102,7 @@ type ExtTable struct {
 	ExtensionName string
 }
 
+// Creates a new db instance by creating a connection pool
 func NewDb(ctx context.Context, params utils.DbParams) (*Db, error) {
 	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", params.Username, params.Password, params.Host, params.Port, params.Db)
 	cfg, err := pgxpool.ParseConfig(url)
@@ -118,6 +117,25 @@ func NewDb(ctx context.Context, params utils.DbParams) (*Db, error) {
 	return &Db{Conn: conn, Username: params.Username, Password: params.Password, Host: params.Host, Port: params.Port, DbName: params.Db, EnvPassword: fmt.Sprintf(`PGPASSWORD=%v`, params.Password), Url: url}, nil
 }
 
+// Resets database connection
+func (db *Db) ResetConn() error {
+	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", db.Username, db.Password, db.Host, db.Port, db.DbName)
+	cfg, err := pgxpool.ParseConfig(url)
+
+	if err != nil {
+		return err
+	}
+	conn, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		return err
+	}
+	db.Conn = conn
+	return nil
+}
+
+// Drops and recrates the database restoring to, does this by opening a new connection as the postgres user.
+// Then disconnecting all other clients then dropping and recreating the database.
+// Reconnects to the original connection after dropping, to make sure its able to perform consecutive operations
 func (db *Db) DropAndCreateDb() error {
 	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", db.Username, db.Password, db.Host, db.Port, "postgres")
 	cfg, err := pgxpool.ParseConfig(url)
@@ -129,23 +147,26 @@ func (db *Db) DropAndCreateDb() error {
 		return err
 	}
 	defer conn.Close()
-
 	_, err = conn.Exec(context.Background(), `
 		SELECT pg_terminate_backend(pg_stat_activity.pid)
 		FROM pg_stat_activity
 		WHERE pg_stat_activity.datname = $1
 		AND pid <> pg_backend_pid()`, db.DbName)
 	if err != nil {
-		return err
+		return fmt.Errorf("error running pg_terminate_backend: %w", err)
 	}
 
 	_, err = conn.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS \"%s\"", db.DbName))
 	if err != nil {
-		return err
+		return fmt.Errorf("error dropping db: %w", err)
 	}
 	_, err = conn.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE \"%s\"", db.DbName))
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating db: %w", err)
+	}
+
+	if err = db.ResetConn(); err != nil {
+		return fmt.Errorf("error resetting db conn: %w", err)
 	}
 
 	return nil
@@ -220,7 +241,7 @@ func (db *Db) PgxConn() (*pgx.Conn, error) {
 func (db *Db) GetExtensions() ([]ExtTable, error) {
 	rows, err := db.Conn.Query(context.Background(), pgExtentionsQuery)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting table extentions: %w", err)
 	}
 	var tables []ExtTable
 	for rows.Next() {
