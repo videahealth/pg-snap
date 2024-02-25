@@ -29,7 +29,7 @@ func LoadPgTables(dirPath string, dbConn *db.Db) ([]db.Table, error) {
 
 	for _, entry := range entries {
 		if entry.IsDir() {
-			fullPath := filepath.Join(dirPath, "table.bin")
+			fullPath := filepath.Join(dirPath, entry.Name(), "table.bin")
 
 			pgTable, err := db.DeserializeTable(fullPath, dbConn)
 			if err != nil {
@@ -150,7 +150,7 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	root := "./data-dump"
-	// defer os.RemoveAll(root)
+	defer os.RemoveAll(root)
 
 	if err != nil {
 		return err

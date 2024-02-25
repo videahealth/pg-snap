@@ -22,3 +22,5 @@ go.work
 
 data-dump
 .DS_Store
+
+*.tar.gz
