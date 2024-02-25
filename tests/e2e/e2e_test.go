@@ -194,6 +194,9 @@ func RestoreDb(t *testing.T) {
 }
 
 func TestE2E(t *testing.T) {
+	if os.Getenv("TEST") != "e2e" {
+		t.Skip("Skipping testing in CI environment")
+	}
 	DumpDb(t)
 	RestoreDb(t)
 	t.Cleanup(func() {
