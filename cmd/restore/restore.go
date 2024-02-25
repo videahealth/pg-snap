@@ -145,16 +145,15 @@ func Run(ctx context.Context, cmd *cli.Command) error {
 		return errors.New("major postgres version does not match pg_dump")
 	}
 
-	root, err := os.MkdirTemp("", "")
-	defer os.RemoveAll(root)
-
-	if err != nil {
+	if err = DecompressDir(inputFile, "."); err != nil {
 		return err
 	}
 
-	if err = DecompressDir(inputFile, "."); err != nil {
-		return err
+	root := "./data-dump"
+	// defer os.RemoveAll(root)
 
+	if err != nil {
+		return err
 	}
 
 	fmt.Println(root)
