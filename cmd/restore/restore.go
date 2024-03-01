@@ -136,8 +136,16 @@ func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
 			return fmt.Errorf("given input file %s does not exist", inputFile)
 		}
 	}
+	root := "./data-dump"
+	defer os.RemoveAll(root)
+	dp := db.NewPsql(root)
+	if err := DecompressDir(inputFile, "."); err != nil {
+		return err
+	}
 
-	pg, err := db.NewDb(context.Background(), dbParams)
+	dp.SplitDDLWithFks()
+
+	pg, err := db.NewDb(context.Background(), dbParams, nil)
 
 	if err != nil {
 		return err
@@ -154,17 +162,6 @@ func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
 		return errors.New("major postgres version does not match pg_dump")
 	}
 
-	if err = DecompressDir(inputFile, "."); err != nil {
-		return err
-	}
-
-	root := "./data-dump"
-	defer os.RemoveAll(root)
-
-	if err != nil {
-		return err
-	}
-
 	tables, err := LoadPgTables(root, pg)
 
 	if err != nil {
@@ -179,7 +176,7 @@ func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
 		return err
 	}
 
-	ddlPath, err := filepath.Abs(filepath.Join(root, "ddl.sql"))
+	ddlPath, err := filepath.Abs(filepath.Join(root, "rem.sql"))
 	if err != nil {
 		return err
 	}
@@ -221,7 +218,7 @@ func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
 
 	log.Info("Loading database DDL")
 
-	fksPath, err := filepath.Abs(filepath.Join(root, "fk_constraints.sql"))
+	fksPath, err := filepath.Abs(filepath.Join(root, "fk.sql"))
 	if err != nil {
 		return err
 	}

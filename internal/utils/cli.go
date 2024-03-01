@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"fmt"
 	"strconv"
+	"sync/atomic"
 
+	"github.com/charmbracelet/log"
 	"github.com/urfave/cli/v3"
 )
 
@@ -21,6 +24,7 @@ type ProgramParams struct {
 	TarFilePath        string
 	SkipTables         string
 	AskForConfirmation bool
+	Subset             string
 }
 
 func ParseDbParamsFromCli(cmd *cli.Command) *DbParams {
@@ -55,5 +59,17 @@ func ParseProgramParamsFromCli(cmd *cli.Command) *ProgramParams {
 		TarFilePath:        cmd.String("file"),
 		SkipTables:         cmd.String("skip-tables"),
 		AskForConfirmation: true,
+		Subset:             cmd.String("subset"),
 	}
+}
+
+func DisplayProgress(ops *atomic.Uint64, rows int64, total int, tableName string) {
+	ops.Add(1)
+	progress := ops.Load()
+
+	log.Info(SprintfNoNewlines("COPIED %s rows from %s",
+		Colored(Green, fmt.Sprint(rows)),
+		Colored(Yellow, tableName)),
+		"progress",
+		SprintfNoNewlines("%d / %d", progress, total))
 }

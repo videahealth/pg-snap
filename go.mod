@@ -47,6 +47,7 @@ require (
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc5 // indirect
+	github.com/pganalyze/pg_query_go/v5 v5.1.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

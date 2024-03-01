@@ -7,8 +7,17 @@ import (
 	"encoding/gob"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/charmbracelet/log"
+	"github.com/videahealth/pg-snap/internal/utils"
 )
+
+type Col struct {
+	Name string
+	Type string
+}
 
 type TableInfo struct {
 	Name       string
@@ -23,6 +32,7 @@ type Table struct {
 	Id          string
 	SampleQuery string
 	NumRows     int64
+	Cols        []Col
 }
 
 // readFirstLine reads the first line from the file for use as column names in the COPY command.
@@ -47,20 +57,24 @@ func readFirstLine(file *os.File) (string, error) {
 	return "", fmt.Errorf("file is empty")
 }
 
-func NewTable(name string, schema string, db *Db) Table {
+func NewTable(name string, schema string, cols []Col) *Table {
 	identifer := NormalizeName(schema, name)
 	display := fmt.Sprintf("%s.%s", schema, name)
 
-	return Table{
+	return &Table{
 		Details: &TableInfo{
 			Name:       name,
 			Schema:     schema,
 			Identifier: identifer,
 			Display:    display,
 		},
-		db: db,
-		Id: display,
+		Id:   display,
+		Cols: cols,
 	}
+}
+
+func (t *Table) AddDbConn(db *Db) {
+	t.db = db
 }
 
 func (t *Table) CopyOut(path, query string) (int64, error) {
@@ -69,9 +83,10 @@ func (t *Table) CopyOut(path, query string) (int64, error) {
 		return 0, err
 	}
 	defer file.Close()
+	file.Seek(0, 0)
 	sql := fmt.Sprintf("COPY (%s) TO STDOUT WITH CSV HEADER DELIMITER ','", query)
 	if query == "" {
-		sql = fmt.Sprintf("COPY (SELECT * FROM %s) TO STDOUT WITH CSV HEADER DELIMITER ','", t.Id)
+		sql = fmt.Sprintf("COPY (SELECT * FROM %s) TO STDOUT WITH CSV HEADER DELIMITER ','", t.Details.Identifier)
 	}
 	rows, err := t.db.CopyFrom(context.Background(), file, sql)
 	if err != nil {
@@ -188,6 +203,37 @@ func DeserializeTable(path string, db *Db) (*Table, error) {
 	table.db = db
 
 	return &table, nil
+}
+
+func (t *Table) PerformCopy(root string, query string) int64 {
+	log.Debug(utils.SprintfNoNewlines("COPYING data from table %s", t.Details.Display))
+
+	dirPath := filepath.Join(root, t.Details.Display)
+
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		log.Error("Error copying for table %s: %s", t.Details.Display, err)
+	}
+
+	path := filepath.Join(dirPath, "data.csv")
+	dataPath := filepath.Join(dirPath, "table.bin")
+
+	rows, err := t.CopyOut(path, query)
+	if err != nil {
+		log.Error("Error copying data for table %s: %w", t.Details.Display, err)
+	}
+
+	err = t.SerializeTable(dataPath)
+
+	if err != nil {
+		log.Error("Error serializing data for table %s: %w", t.Details.Display, err)
+	}
+
+	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+		log.Error("Error serializing data for table %s: %s", t.Details.Display, err)
+	}
+
+	return rows
+
 }
 
 func NormalizeName(s, n string) string {

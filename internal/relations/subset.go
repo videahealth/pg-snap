@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/charmbracelet/log"
 	"github.com/videahealth/pg-snap/internal/db"
@@ -26,44 +27,46 @@ type Row struct {
 
 type Subset struct {
 	Relations        []db.ForeignKeyInfo
-	Tables           []db.Table
+	Tables           []*db.Table
 	StartTableName   string
 	StartTableSchema string
 	SubsetQuery      string
 	DAG              DAG
+	RootFolder       string
 }
 
-func NewSubset(pg *db.Db, tables []db.Table) (*Subset, error) {
-	relations, err := pg.GetForeignKeys()
-	if err != nil {
-		return nil, err
-	}
+func NewSubset(pg *db.Db, tables []*db.Table, startTable, startSchema, rootFolder, query string) (*Subset, error) {
+	relations := pg.GetForeignKeys()
 
 	var rels []db.ForeignKeyInfo
 
 	for _, rel := range relations {
+
 		mainTable, _ := GetTable(tables, db.NormalizeName(rel.Schema, rel.Name))
 		otherTable, _ := GetTable(tables, db.NormalizeName(rel.ForeignSchema, rel.ForeignName))
 		if mainTable != nil && otherTable != nil {
 			rels = append(rels, rel)
 		}
 	}
-
 	return &Subset{
 		Relations:        rels,
 		Tables:           tables,
-		StartTableName:   "ImagingPatients",
-		StartTableSchema: "public",
-		SubsetQuery:      `select * from "ImagingPatients" where id in (5717,5716,5715,5705,5704,5703,5702)`,
+		StartTableName:   startTable,
+		StartTableSchema: startSchema,
+		SubsetQuery:      fmt.Sprintf("SELECT * FROM %s WHERE %s", db.NormalizeName(startSchema, startTable), query),
 		DAG:              BuildRelations(rels),
+		RootFolder:       rootFolder,
 	}, nil
 }
 
 func (s *Subset) Visit() {
+
 	copiedData := make(map[*Node]bool)
 	gVisited := make(map[*Node]bool)
 	startNode := s.DAG.FindNodeByData(db.NormalizeName(s.StartTableSchema, s.StartTableName))
 	newDAG := s.DAG.FindClosedSystemFullDAG(startNode)
+	var ops atomic.Uint64
+	total := len(s.Tables)
 
 	visitNode := func(node *Node, visitMode VisitMode) bool {
 		table, err := GetTable(s.Tables, node.Data)
@@ -77,7 +80,7 @@ func (s *Subset) Visit() {
 
 		if !copiedData[node] {
 			if node.Data == db.NormalizeName(s.StartTableSchema, s.StartTableName) {
-				PerformCopy(*table, s.SubsetQuery)
+				table.PerformCopy(s.RootFolder, s.SubsetQuery)
 				copiedData[node] = true
 			} else {
 				var conditions []string
@@ -109,7 +112,8 @@ func (s *Subset) Visit() {
 				if len(conditions) > 0 {
 					queryCondition := strings.Join(conditions, " OR ")
 					selectSt := fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
-					PerformCopy(*table, selectSt)
+					rows := table.PerformCopy(s.RootFolder, selectSt)
+					utils.DisplayProgress(&ops, rows, total, table.Details.Display)
 					copiedData[node] = true
 				}
 			}
@@ -142,7 +146,7 @@ func (s *Subset) Visit() {
 	}
 }
 
-func GetTableDetailsAndCsvPath(tables []db.Table, toCopyId string, foreignTableId string) (toCopy *db.Table, foreignTable *db.Table, foreignTableCsvPath string, err error) {
+func GetTableDetailsAndCsvPath(tables []*db.Table, toCopyId string, foreignTableId string) (toCopy *db.Table, foreignTable *db.Table, foreignTableCsvPath string, err error) {
 	toCopy, err = GetTable(tables, toCopyId)
 	if err != nil {
 		log.Fatalf("error getting table: %s", err)
@@ -189,7 +193,7 @@ func BuildConditions(toCopyId string, foreignTableCsvPath string, cols []db.Fore
 	return conditions
 }
 
-func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []db.Table) string {
+func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) string {
 	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId)
 	if err != nil {
 		log.Fatalf("error in preparation: %s", err)
@@ -204,7 +208,7 @@ func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.
 	return ""
 }
 
-func BuildPredecessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []db.Table) string {
+func BuildPredecessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) string {
 	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId)
 	if err != nil {
 		log.Fatalf("error in preparation: %s", err)
@@ -226,28 +230,25 @@ func FormatCols(data []string, colType string) string {
 		if d == "" {
 			continue
 		}
-		switch t := colType; t {
-		case "character":
+		if colType == "character" || colType == "text" || colType == "character varying" || colType == "uuid" || colType == "varchar" {
 			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		case "text":
-			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		case "integer":
+		} else if colType == "integer" || colType == "bigint" || strings.HasPrefix(colType, "int") {
 			dataVals = append(dataVals, d)
-		case "bigint":
+		} else if colType == "boolean" {
 			dataVals = append(dataVals, d)
-		case "character varying":
+		} else if colType == "date" || colType == "timestamp" {
 			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		case "uuid":
+		} else if colType == "numeric" || colType == "real" || colType == "double precision" {
+			dataVals = append(dataVals, d)
+		} else if colType == "bytea" {
 			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		default:
-			log.Errorf("unsopported data type %s", t)
-			os.Exit(1)
+		} else {
+			log.Fatalf("unsupported data type %s", colType)
 		}
 	}
 
 	return strings.Join(dataVals, ",")
 }
-
 func GetTableFk(ftSchema, ftName, schema, name string, relations []db.ForeignKeyInfo) []db.ForeignKeyInfo {
 	var preds []db.ForeignKeyInfo
 
@@ -273,35 +274,4 @@ func BuildRelations(relations []db.ForeignKeyInfo) DAG {
 	}
 
 	return *dag
-}
-
-func PerformCopy(tbl db.Table, query string) {
-	root := "./data-dump"
-
-	log.Debug(utils.SprintfNoNewlines("COPYING data from table %s", tbl.Details.Display))
-
-	dirPath := filepath.Join(root, tbl.Details.Display)
-
-	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-		log.Error("Error copying for table %s: %s", tbl.Details.Display, err)
-	}
-
-	path := filepath.Join(dirPath, "data.csv")
-	dataPath := filepath.Join(dirPath, "table.bin")
-
-	err := tbl.CopyOutPaginated(path, query, int64(100))
-	if err != nil {
-		log.Error("Error copying data for table %s: %w", tbl.Details.Display, err)
-	}
-
-	err = tbl.SerializeTable(dataPath)
-
-	if err != nil {
-		log.Error("Error serializing data for table %s: %w", tbl.Details.Display, err)
-	}
-
-	if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-		log.Error("Error serializing data for table %s: %s", tbl.Details.Display, err)
-	}
-
 }

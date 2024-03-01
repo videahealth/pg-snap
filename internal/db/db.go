@@ -94,6 +94,7 @@ type Db struct {
 	DbName      string
 	EnvPassword string
 	Url         string
+	DumpResult  *DumpParser
 }
 
 type ExtTable struct {
@@ -116,7 +117,7 @@ type ForeignKeyInfo struct {
 }
 
 // Creates a new db instance by creating a connection pool
-func NewDb(ctx context.Context, params utils.DbParams) (*Db, error) {
+func NewDb(ctx context.Context, params utils.DbParams, dp *DumpParser) (*Db, error) {
 	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", params.Username, params.Password, params.Host, params.Port, params.Db)
 	cfg, err := pgxpool.ParseConfig(url)
 
@@ -127,7 +128,8 @@ func NewDb(ctx context.Context, params utils.DbParams) (*Db, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Db{Conn: conn, Username: params.Username, Password: params.Password, Host: params.Host, Port: params.Port, DbName: params.Db, EnvPassword: fmt.Sprintf(`PGPASSWORD=%v`, params.Password), Url: url}, nil
+
+	return &Db{Conn: conn, Username: params.Username, Password: params.Password, Host: params.Host, Port: params.Port, DbName: params.Db, EnvPassword: fmt.Sprintf(`PGPASSWORD=%v`, params.Password), Url: url, DumpResult: dp}, nil
 }
 
 // Resets database connection
@@ -275,31 +277,15 @@ func (db *Db) GetExtensions() ([]ExtTable, error) {
 	return tables, nil
 }
 
-func (db *Db) GetAllTables(st map[string]struct{}) ([]Table, error) {
-	rows, err := db.Conn.Query(context.Background(), `
-		SELECT schemaname as schema, 
-			   tablename as name 
-		FROM pg_catalog.pg_tables 
-		WHERE schemaname NOT LIKE 'pg_%' 
-		AND schemaname != 'information_schema'
-	;`)
-	if err != nil {
-		return nil, err
-	}
-	var tables []Table
-	for rows.Next() {
-		var name string
-		var schema string
-		err := rows.Scan(&schema, &name)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if !ShouldSkip(schema, name, st) {
-			tables = append(tables, NewTable(name, schema, db))
+func (db *Db) GetAllTables(st map[string]struct{}) []*Table {
+	var tables []*Table
+	for _, tbl := range db.DumpResult.Tables {
+		if !ShouldSkip(tbl.Details.Schema, tbl.Details.Name, st) {
+			tbl.AddDbConn(db)
+			tables = append(tables, tbl)
 		}
 	}
-
-	return tables, nil
+	return tables
 }
 
 func (db *Db) CopyFrom(ctx context.Context, r io.Writer, sql string) (int64, error) {
@@ -338,51 +324,8 @@ func (db *Db) CopyTo(ctx context.Context, r io.Reader, sql string) (int64, error
 	return res.RowsAffected(), nil
 }
 
-func (db *Db) GetForeignKeys() ([]ForeignKeyInfo, error) {
-	rows, err := db.Conn.Query(context.Background(), `
-	SELECT
-    tc.table_schema,
-    tc.table_name,
-    kcu.column_name,
-    ccu.table_schema AS foreign_table_schema,
-    ccu.table_name AS foreign_table_name,
-    ccu.column_name AS foreign_column_name,
-    foreign_columns.data_type AS foreign_column_type,
-    columns.data_type AS column_type
-FROM information_schema.table_constraints AS tc
-JOIN information_schema.key_column_usage AS kcu
-    ON tc.constraint_name = kcu.constraint_name
-    AND tc.table_schema = kcu.table_schema
-JOIN information_schema.constraint_column_usage AS ccu
-    ON ccu.constraint_name = tc.constraint_name
-JOIN
-    information_schema.columns AS foreign_columns
-    ON foreign_columns.table_schema = ccu.table_schema
-    AND foreign_columns.table_name = ccu.table_name
-    AND foreign_columns.column_name = ccu.column_name
-JOIN
-    information_schema.columns AS columns
-    ON columns.table_schema = tc.table_schema
-    AND columns.table_name = tc.table_name
-    AND columns.column_name = kcu.column_name
-WHERE tc.constraint_type = 'FOREIGN KEY';
-	;`)
-	if err != nil {
-		return nil, err
-	}
-	var tables []ForeignKeyInfo
-	for rows.Next() {
-		var table ForeignKeyInfo
-		err := rows.Scan(&table.Schema, &table.Name, &table.ColumnName, &table.ForeignSchema, &table.ForeignName, &table.ForeignColumnName, &table.ForeignColType, &table.ColType)
-		if err != nil {
-			log.Fatal(err)
-		}
-		table.SourceTableId = fmt.Sprintf("%s.%s", table.Schema, table.Name)
-		table.ForeignTableId = fmt.Sprintf("%s.%s", table.ForeignSchema, table.ForeignName)
-		tables = append(tables, table)
-	}
-
-	return tables, nil
+func (db *Db) GetForeignKeys() []ForeignKeyInfo {
+	return db.DumpResult.FkAttributes
 }
 
 func (db *Db) GetVersion() string {

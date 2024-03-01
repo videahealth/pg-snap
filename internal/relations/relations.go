@@ -14,10 +14,10 @@ func reverse[S ~[]E, E any](s S) {
 	}
 }
 
-func GetTable(tables []db.Table, id string) (*db.Table, error) {
+func GetTable(tables []*db.Table, id string) (*db.Table, error) {
 	for _, table := range tables {
 		if table.Details.Identifier == id {
-			return &table, nil
+			return table, nil
 		}
 	}
 	return nil, fmt.Errorf("error table not found for name %s", id)
@@ -34,12 +34,8 @@ func GetTablePredecessors(schema string, name string, relations []db.ForeignKeyI
 	return preds
 }
 
-func GetRelations(pg *db.Db, tables []db.Table, sampleTable string, numSample int) error {
-	relations, err := pg.GetForeignKeys()
-
-	if err != nil {
-		return err
-	}
+func GetRelations(pg *db.Db, tables []*db.Table, sampleTable string, numSample int) error {
+	relations := pg.GetForeignKeys()
 
 	dag := &DAG{}
 

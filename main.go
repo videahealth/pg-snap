@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
+	"time"
 
+	"github.com/charmbracelet/log"
 	"github.com/urfave/cli/v3"
 	"github.com/videahealth/pg-snap/cmd/dump"
 	"github.com/videahealth/pg-snap/cmd/restore"
@@ -21,9 +22,12 @@ func main() {
 		},
 	}
 
+	start := time.Now()
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		log.Fatalf("Application failed: %v", err)
 	}
+	duration := time.Since(start)
+	log.Info("Command completed in", "duration", duration.Round(time.Millisecond).String())
 }
 
 func dbFlags() []cli.Flag {
@@ -67,7 +71,9 @@ func initDumpCommand() *cli.Command {
 		Name:   "dump",
 		Usage:  "Dumps the database into a file",
 		Action: dump.Run,
-		Flags:  append(dbFlags(), &cli.StringFlag{Name: "skip-tables", Usage: "Comma-separated list of tables to skip"}),
+		Flags: append(dbFlags(),
+			&cli.StringFlag{Name: "skip-tables", Usage: "Comma-separated list of tables to skip"},
+			&cli.StringFlag{Name: "subset", Usage: `Starting database to subset from. Ex: public.Cars[\"modelName\" = 'Honda' ORDER BY \"createdAt\" DESC LIMIT 10]`}),
 	}
 }
 
