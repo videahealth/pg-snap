@@ -275,3 +275,12 @@ func BuildRelations(relations []db.ForeignKeyInfo) DAG {
 
 	return *dag
 }
+
+func GetTable(tables []*db.Table, id string) (*db.Table, error) {
+	for _, table := range tables {
+		if table.Details.Identifier == id {
+			return table, nil
+		}
+	}
+	return nil, fmt.Errorf("error table not found for name %s", id)
+}
