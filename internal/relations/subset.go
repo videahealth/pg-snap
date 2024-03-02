@@ -126,6 +126,7 @@ func (s *Subset) TraverseAndCopyData() error {
 			queryNodes = newDAG.FindPredecessors(node)
 		}
 
+		// visit all successors / prdecessors and build the query to run
 		for _, p := range queryNodes {
 			vis := gVisited[p.Data]
 			if vis && copiedData[p.Data] {
@@ -147,21 +148,21 @@ func (s *Subset) TraverseAndCopyData() error {
 			}
 		}
 
-		if len(conditions) > 0 {
-			if node.Data == "\"public\".\"food_des\"" {
-				fmt.Println(len(conditions))
-			}
-			queryCondition := strings.Join(conditions, " OR ")
-			var selectSt string
-			if s.MaxRowsPerTable == -1 || visitMode == VisitPredecessors {
-				selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
-			} else {
-				selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", node.Data, queryCondition, s.MaxRowsPerTable)
-			}
-			rows := table.PerformCopy(s.RootFolder, selectSt)
-			utils.DisplayProgress(&ops, rows, total, table.Details.Display)
-			copiedData[node.Data] = true
+		if len(conditions) == 0 {
+			return nil
 		}
+
+		// copy the data
+		queryCondition := strings.Join(conditions, " OR ")
+		var selectSt string
+		if s.MaxRowsPerTable == -1 || visitMode == VisitPredecessors {
+			selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
+		} else {
+			selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", node.Data, queryCondition, s.MaxRowsPerTable)
+		}
+		rows := table.PerformCopy(s.RootFolder, selectSt)
+		utils.DisplayProgress(&ops, rows, total, table.Details.Display)
+		copiedData[node.Data] = true
 
 		return nil
 	}
