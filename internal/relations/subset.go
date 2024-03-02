@@ -103,59 +103,66 @@ func (s *Subset) TraverseAndCopyData() error {
 
 		isRootNode := node.Data == db.NormalizeName(s.StartTableSchema, s.StartTableName)
 
-		if !copiedData[node.Data] {
-			if isRootNode {
-				rows := table.PerformCopy(s.RootFolder, s.SubsetQuery)
-				utils.DisplayProgress(&ops, rows, total, table.Details.Display)
-				copiedData[node.Data] = true
-			} else {
-				var conditions []string
-				var queryNodes []*Node
+		// return if we have already copied data for this node
+		if copiedData[node.Data] {
+			return nil
+		}
 
-				switch visitMode {
-				case VisitSuccessors:
-					queryNodes = node.Children
-				case VisitPredecessors:
-					queryNodes = newDAG.FindPredecessors(node)
-				}
-				for _, p := range queryNodes {
-					vis := gVisited[p.Data]
-					if vis && copiedData[p.Data] {
-						var q string
-						if visitMode == VisitSuccessors {
-							q, err = BuildSuccessorQuery(p.Data, node.Data, s.Relations, s.Tables)
-							if err != nil {
-								return err
-							}
-						} else {
-							q, err = BuildPredecessorQuery(p.Data, node.Data, s.Relations, s.Tables)
-							if err != nil {
-								return err
-							}
-						}
-						if q != "" {
-							conditions = append(conditions, q)
-						}
-					}
-				}
+		// If its the root node, we immediatly copy data and return
+		if isRootNode {
+			rows := table.PerformCopy(s.RootFolder, s.SubsetQuery)
+			utils.DisplayProgress(&ops, rows, total, table.Details.Display)
+			copiedData[node.Data] = true
+			return nil
+		}
 
-				if len(conditions) > 0 {
-					if node.Data == "\"public\".\"food_des\"" {
-						fmt.Println(len(conditions))
+		var conditions []string
+		var queryNodes []*Node
+
+		switch visitMode {
+		case VisitSuccessors:
+			queryNodes = node.Children
+		case VisitPredecessors:
+			queryNodes = newDAG.FindPredecessors(node)
+		}
+
+		for _, p := range queryNodes {
+			vis := gVisited[p.Data]
+			if vis && copiedData[p.Data] {
+				var q string
+				if visitMode == VisitSuccessors {
+					q, err = BuildSuccessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+					if err != nil {
+						return err
 					}
-					queryCondition := strings.Join(conditions, " OR ")
-					var selectSt string
-					if s.MaxRowsPerTable == -1 || visitMode == VisitPredecessors {
-						selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
-					} else {
-						selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", node.Data, queryCondition, s.MaxRowsPerTable)
+				} else {
+					q, err = BuildPredecessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+					if err != nil {
+						return err
 					}
-					rows := table.PerformCopy(s.RootFolder, selectSt)
-					utils.DisplayProgress(&ops, rows, total, table.Details.Display)
-					copiedData[node.Data] = true
+				}
+				if q != "" {
+					conditions = append(conditions, q)
 				}
 			}
 		}
+
+		if len(conditions) > 0 {
+			if node.Data == "\"public\".\"food_des\"" {
+				fmt.Println(len(conditions))
+			}
+			queryCondition := strings.Join(conditions, " OR ")
+			var selectSt string
+			if s.MaxRowsPerTable == -1 || visitMode == VisitPredecessors {
+				selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
+			} else {
+				selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", node.Data, queryCondition, s.MaxRowsPerTable)
+			}
+			rows := table.PerformCopy(s.RootFolder, selectSt)
+			utils.DisplayProgress(&ops, rows, total, table.Details.Display)
+			copiedData[node.Data] = true
+		}
+
 		return nil
 	}
 
