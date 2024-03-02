@@ -33,9 +33,10 @@ type Subset struct {
 	SubsetQuery      string
 	DAG              DAG
 	RootFolder       string
+	MaxRowsPerTable  int32
 }
 
-func NewSubset(pg *db.Db, tables []*db.Table, startTable, startSchema, rootFolder, query string) (*Subset, error) {
+func NewSubset(pg *db.Db, tables []*db.Table, startTable, startSchema, rootFolder, query string, maxRowsPerTable int32) (*Subset, error) {
 	relations := pg.GetForeignKeys()
 
 	var rels []db.ForeignKeyInfo
@@ -48,6 +49,12 @@ func NewSubset(pg *db.Db, tables []*db.Table, startTable, startSchema, rootFolde
 			rels = append(rels, rel)
 		}
 	}
+
+	var maxRows int32
+	if maxRowsPerTable == 0 {
+		maxRows = -1
+	}
+
 	return &Subset{
 		Relations:        rels,
 		Tables:           tables,
@@ -56,32 +63,45 @@ func NewSubset(pg *db.Db, tables []*db.Table, startTable, startSchema, rootFolde
 		SubsetQuery:      fmt.Sprintf("SELECT * FROM %s WHERE %s", db.NormalizeName(startSchema, startTable), query),
 		DAG:              BuildRelations(rels),
 		RootFolder:       rootFolder,
+		MaxRowsPerTable:  maxRows,
 	}, nil
 }
 
-func (s *Subset) Visit() {
+// TraverseAndCopyData performs a subset algorithm to copy Table data across a directed acyclic graph (DAG) with the following steps:
+//  1. Identifies a new closed system DAG starting from the `startNode`.
+//  2. Traverses the graph from the start, generating a list of nodes connected (directly or indirectly) to the `startNode`.
+//  3. Iterates over each node, visiting all its predecessors and successors to understand the graph's connectivity.
+//  4. Checks if a node's data has already been copied; if so, it skips to the next node to avoid duplication.
+//  5. If the node is the `startNode`, it copies its data immediately and proceeds no further with this node.
+//  6. For other nodes, it determines the connected nodes based on the traversal direction. If data for these connected nodes has been copied,
+//     it resolves the foreign key (FK) relationships. It then copies the data that connects from the current node to the nodes being visited,
+//     ensuring data integrity and relational consistency.
+func (s *Subset) TraverseAndCopyData() error {
 
-	copiedData := make(map[*Node]bool)
-	gVisited := make(map[*Node]bool)
+	copiedData := make(map[string]bool)
+	gVisited := make(map[string]bool)
 	startNode := s.DAG.FindNodeByData(db.NormalizeName(s.StartTableSchema, s.StartTableName))
 	newDAG := s.DAG.FindClosedSystemFullDAG(startNode)
 	var ops atomic.Uint64
 	total := len(s.Tables)
 
-	visitNode := func(node *Node, visitMode VisitMode) bool {
+	visitNode := func(node *Node, visitMode VisitMode) error {
 		table, err := GetTable(s.Tables, node.Data)
 
-		gVisited[node] = true
+		gVisited[node.Data] = true
 
 		if err != nil {
 			log.Fatalf("error getting table: %s", err)
-			return false
+			return nil
 		}
 
-		if !copiedData[node] {
-			if node.Data == db.NormalizeName(s.StartTableSchema, s.StartTableName) {
-				table.PerformCopy(s.RootFolder, s.SubsetQuery)
-				copiedData[node] = true
+		isRootNode := node.Data == db.NormalizeName(s.StartTableSchema, s.StartTableName)
+
+		if !copiedData[node.Data] {
+			if isRootNode {
+				rows := table.PerformCopy(s.RootFolder, s.SubsetQuery)
+				utils.DisplayProgress(&ops, rows, total, table.Details.Display)
+				copiedData[node.Data] = true
 			} else {
 				var conditions []string
 				var queryNodes []*Node
@@ -92,16 +112,20 @@ func (s *Subset) Visit() {
 				case VisitPredecessors:
 					queryNodes = newDAG.FindPredecessors(node)
 				}
-
 				for _, p := range queryNodes {
-					vis := gVisited[p]
-
-					if vis && copiedData[p] {
+					vis := gVisited[p.Data]
+					if vis && copiedData[p.Data] {
 						var q string
 						if visitMode == VisitSuccessors {
-							q = BuildSuccessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+							q, err = BuildSuccessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+							if err != nil {
+								return err
+							}
 						} else {
-							q = BuildPredecessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+							q, err = BuildPredecessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+							if err != nil {
+								return err
+							}
 						}
 						if q != "" {
 							conditions = append(conditions, q)
@@ -110,23 +134,26 @@ func (s *Subset) Visit() {
 				}
 
 				if len(conditions) > 0 {
+					if node.Data == "\"public\".\"food_des\"" {
+						fmt.Println(len(conditions))
+					}
 					queryCondition := strings.Join(conditions, " OR ")
-					selectSt := fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
+					var selectSt string
+					if s.MaxRowsPerTable == -1 || visitMode == VisitPredecessors {
+						selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s", node.Data, queryCondition)
+					} else {
+						selectSt = fmt.Sprintf("SELECT * FROM %s WHERE %s LIMIT %d", node.Data, queryCondition, s.MaxRowsPerTable)
+					}
 					rows := table.PerformCopy(s.RootFolder, selectSt)
 					utils.DisplayProgress(&ops, rows, total, table.Details.Display)
-					copiedData[node] = true
+					copiedData[node.Data] = true
 				}
 			}
 		}
-		return true
+		return nil
 	}
 
 	nodes := newDAG.TraverseGraphFromStart(startNode)
-	for _, node := range nodes {
-		visitNode(node, VisitSuccessors)
-		visitNode(node, VisitPredecessors)
-	}
-
 	for {
 		totalCopied := 0
 		for _, visited := range copiedData {
@@ -137,13 +164,20 @@ func (s *Subset) Visit() {
 		if totalCopied >= len(newDAG.Nodes) {
 			break
 		}
+
 		for _, node := range nodes {
-			if !copiedData[node] {
-				visitNode(node, VisitPredecessors)
-				visitNode(node, VisitSuccessors)
+			if !copiedData[node.Data] {
+				if err := visitNode(node, VisitPredecessors); err != nil {
+					return err
+				}
+				if err := visitNode(node, VisitSuccessors); err != nil {
+					return err
+				}
 			}
 		}
 	}
+
+	return nil
 }
 
 func GetTableDetailsAndCsvPath(tables []*db.Table, toCopyId string, foreignTableId string) (toCopy *db.Table, foreignTable *db.Table, foreignTableCsvPath string, err error) {
@@ -159,7 +193,7 @@ func GetTableDetailsAndCsvPath(tables []*db.Table, toCopyId string, foreignTable
 	return
 }
 
-func BuildConditions(toCopyId string, foreignTableCsvPath string, cols []db.ForeignKeyInfo, visitMode VisitMode) []string {
+func BuildConditions(toCopyId string, foreignTableCsvPath string, cols []db.ForeignKeyInfo, visitMode VisitMode) ([]string, error) {
 	var conditions []string
 
 	for _, fk := range cols {
@@ -182,7 +216,10 @@ func BuildConditions(toCopyId string, foreignTableCsvPath string, cols []db.Fore
 			continue
 		}
 
-		colData := FormatCols(data, fkColType)
+		colData, err := FormatCols(data, fkColType)
+		if err != nil {
+			return []string{}, err
+		}
 		if len(colData) == 0 {
 			continue
 		}
@@ -190,65 +227,76 @@ func BuildConditions(toCopyId string, foreignTableCsvPath string, cols []db.Fore
 		conditions = append(conditions, condition)
 	}
 
-	return conditions
+	return conditions, nil
 }
 
-func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) string {
+func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) (string, error) {
 	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId)
 	if err != nil {
 		log.Fatalf("error in preparation: %s", err)
 	}
 
 	cols := GetTableFk(foreignTable.Details.Schema, foreignTable.Details.Name, toCopy.Details.Schema, toCopy.Details.Name, relations)
-	conditions := BuildConditions(toCopyId, foreignTableCsvPath, cols, VisitSuccessors)
+	conditions, err := BuildConditions(toCopyId, foreignTableCsvPath, cols, VisitSuccessors)
+
+	if err != nil {
+		return "", err
+	}
 
 	if len(conditions) != 0 {
-		return strings.Join(conditions, " OR ")
+		return strings.Join(conditions, " OR "), nil
 	}
-	return ""
+	return "", nil
 }
 
-func BuildPredecessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) string {
+func BuildPredecessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) (string, error) {
 	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId)
 	if err != nil {
 		log.Fatalf("error in preparation: %s", err)
 	}
 
 	cols := GetTableFk(toCopy.Details.Schema, toCopy.Details.Name, foreignTable.Details.Schema, foreignTable.Details.Name, relations)
-	conditions := BuildConditions(toCopyId, foreignTableCsvPath, cols, VisitPredecessors)
-
-	if len(conditions) != 0 {
-		return strings.Join(conditions, " OR ")
+	conditions, err := BuildConditions(toCopyId, foreignTableCsvPath, cols, VisitPredecessors)
+	if err != nil {
+		return "", err
 	}
-	return ""
+	if len(conditions) != 0 {
+		return strings.Join(conditions, " OR "), nil
+	}
+	return "", nil
 }
 
-func FormatCols(data []string, colType string) string {
+func FormatCols(data []string, colType string) (string, error) {
 	var dataVals []string
+
+	category, ok := db.SQLTypeMapping[colType]
+	if !ok {
+		log.Fatalf("unsupported data type %s", colType)
+	}
 
 	for _, d := range data {
 		if d == "" {
 			continue
 		}
-		if colType == "character" || colType == "text" || colType == "character varying" || colType == "uuid" || colType == "varchar" {
+		switch {
+		case category == "String types" || category == "UUID types" || colType == "varchar" || strings.Contains(category, "Character types"):
 			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		} else if colType == "integer" || colType == "bigint" || strings.HasPrefix(colType, "int") {
+		case category == "Numeric types" || category == "Integer types":
 			dataVals = append(dataVals, d)
-		} else if colType == "boolean" {
+		case category == "Boolean types":
 			dataVals = append(dataVals, d)
-		} else if colType == "date" || colType == "timestamp" {
+		case category == "Date/time types":
 			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		} else if colType == "numeric" || colType == "real" || colType == "double precision" {
-			dataVals = append(dataVals, d)
-		} else if colType == "bytea" {
+		case category == "Binary types":
 			dataVals = append(dataVals, fmt.Sprintf(`'%s'`, d))
-		} else {
-			log.Fatalf("unsupported data type %s", colType)
+		default:
+			return "", fmt.Errorf("unsupported category %s for data type %s", category, colType)
 		}
 	}
 
-	return strings.Join(dataVals, ",")
+	return strings.Join(dataVals, ","), nil
 }
+
 func GetTableFk(ftSchema, ftName, schema, name string, relations []db.ForeignKeyInfo) []db.ForeignKeyInfo {
 	var preds []db.ForeignKeyInfo
 

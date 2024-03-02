@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/videahealth/pg-snap/internal/utils"
+	"github.com/videahealth/pg-snap/cmd/helpers"
 )
 
-func GetPgCommandFlags(params *utils.DbParams) []string {
+func GetPgCommandFlags(params *helpers.DbParams) []string {
 	var options []string
 
 	if params.Db != "" {
@@ -33,7 +33,7 @@ func GetPgCommandFlags(params *utils.DbParams) []string {
 	return options
 }
 
-func DumpDb(params *utils.DbParams) (string, error) {
+func DumpDb(params *helpers.DbParams) (string, error) {
 	flags := GetPgCommandFlags(params)
 
 	options := []string{"--schema-only"}
@@ -51,7 +51,7 @@ func DumpDb(params *utils.DbParams) (string, error) {
 	return string(output), nil
 }
 
-func ExecuteDDLFile(params *utils.DbParams, path string) error {
+func ExecuteDDLFile(params *helpers.DbParams, path string) error {
 	fullPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)

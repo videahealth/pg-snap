@@ -1,4 +1,4 @@
-package restore
+package cmd
 
 import (
 	"context"
@@ -11,7 +11,8 @@ import (
 	"sync/atomic"
 
 	"github.com/charmbracelet/log"
-	"github.com/urfave/cli/v3"
+	"github.com/spf13/cobra"
+	"github.com/videahealth/pg-snap/cmd/helpers"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
 	"github.com/videahealth/pg-snap/internal/utils"
@@ -113,18 +114,29 @@ func ReadFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTabl
 	return nil
 }
 
-func Run(ctx context.Context, cmd *cli.Command) error {
-	dbParams := *utils.ParseDbParamsFromCli(cmd)
-	programParams := *utils.ParseProgramParamsFromCli(cmd)
-
-	if err := RunCmd(dbParams, programParams); err != nil {
-		return err
-	}
-
-	return nil
+var restoreCmd = &cobra.Command{
+	Use:   "restore",
+	Short: "Restore a dump of the postgres database",
+	Long:  `Takes in a gziped dump file and restores it into the given database.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		dbParams := *helpers.ParseDbParamsFromCli(cmd)
+		programParams := *helpers.ParsRestoreOptions(cmd)
+		if err := RunRestoreCmd(dbParams, programParams); err != nil {
+			log.Error("error runningdump command", "err", err)
+		}
+	},
 }
 
-func RunCmd(dbParams utils.DbParams, programParams utils.ProgramParams) error {
+func init() {
+	rootCmd.AddCommand(restoreCmd)
+
+	addDatabaseFlags(restoreCmd)
+	restoreCmd.Flags().Int32P("concurrency", "c", 5, "Number of concurrent copys")
+	restoreCmd.Flags().StringP("file", "f", "", "File path to the dump file")
+	restoreCmd.MarkFlagFilename("file")
+}
+
+func RunRestoreCmd(dbParams helpers.DbParams, programParams helpers.RestoreOptions) error {
 
 	var inputFile string
 

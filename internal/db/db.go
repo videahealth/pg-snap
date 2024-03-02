@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/videahealth/pg-snap/cmd/helpers"
 	"github.com/videahealth/pg-snap/internal/utils"
 )
 
@@ -117,7 +118,7 @@ type ForeignKeyInfo struct {
 }
 
 // Creates a new db instance by creating a connection pool
-func NewDb(ctx context.Context, params utils.DbParams, dp *DumpParser) (*Db, error) {
+func NewDb(ctx context.Context, params helpers.DbParams, dp *DumpParser) (*Db, error) {
 	url := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", params.Username, params.Password, params.Host, params.Port, params.Db)
 	cfg, err := pgxpool.ParseConfig(url)
 

@@ -1,4 +1,5 @@
 name: release
+
 on:
   push:
     tags:
@@ -30,51 +31,47 @@ jobs:
     strategy:
       matrix:
         build:
-          - macos-aarch64
+          - windows-x64
           - macos-x64
+          - linux-x64
         include:
-          - build: macos-aarch64
-            os: macos-latest
-            target: aarch64-apple-darwin
+          - build: windows-x64
+            os: windows-latest
+            target: windows/amd64
           - build: macos-x64
             os: macos-latest
-            target: x86_64-apple-darwin
+            target: darwin/amd64
+          - build: linux-x64
+            os: ubuntu-latest
+            target: linux/amd64
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+      - name: Set up Go
+        uses: actions/setup-go@v2
         with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-
-      - uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          go-version: "1.20.1"
 
       - name: Build release binary
-        run: cargo build --verbose --release --target ${{ matrix.target }}
+        run: GOOS=${{ matrix.target.split('/')[0] }} GOARCH=${{ matrix.target.split('/')[1] }} go build -o pg-snap-${{ matrix.build }} ${{ github.workspace }}
 
-      - name: Strip release binary (unix)
-        run: strip "target/${{ matrix.target }}/release/pg-snap"
+      - name: Zip release binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive -Path pg-snap-${{ matrix.build }}.exe -DestinationPath pg-snap-${{ github.ref_name }}-${{ matrix.build }}.zip
+        shell: pwsh
 
-      - name: Tar release (unix)
-        working-directory: ./target/${{ matrix.target }}/release
-        run: tar cvfz pg-snap-${{ github.ref_name }}-${{matrix.target}}.tar.gz "pg-snap"
+      - name: Tar release binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: tar cvfz pg-snap-${{ github.ref_name }}-${{ matrix.build }}.tar.gz pg-snap-${{ matrix.build }}
 
-      - name: Upload release archive (unix)
+      - name: Upload release archive
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./target/${{ matrix.target }}/release/pg-snap-${{ github.ref_name }}-${{matrix.target}}.tar.gz
-          asset_name: pg-snap-${{ github.ref_name }}-${{matrix.target}}.tar.gz
+          asset_path: ./pg-snap-${{ github.ref_name }}-${{ matrix.build }}.${{ matrix.os == 'windows-latest' && 'zip' || 'tar.gz' }}
+          asset_name: pg-snap-${{ github.ref_name }}-${{ matrix.build }}.${{ matrix.os == 'windows-latest' && 'zip' || 'tar.gz' }}
           asset_content_type: application/octet-stream
-

@@ -27,3 +27,5 @@ data-dump
 
 snaplet.config.ts
 .snaplet
+bench.py
+data.json

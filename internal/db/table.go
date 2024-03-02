@@ -216,10 +216,9 @@ func (t *Table) PerformCopy(root string, query string) int64 {
 
 	path := filepath.Join(dirPath, "data.csv")
 	dataPath := filepath.Join(dirPath, "table.bin")
-
 	rows, err := t.CopyOut(path, query)
 	if err != nil {
-		log.Error("Error copying data for table %s: %w", t.Details.Display, err)
+		log.Error("Error copying data for table", "table", t.Details.Display, "err", err)
 	}
 
 	err = t.SerializeTable(dataPath)

@@ -12,6 +12,12 @@ type Node struct {
 	Children []*Node
 }
 
+type NodeSlice []*Node
+
+func (n NodeSlice) Len() int           { return len(n) }
+func (n NodeSlice) Less(i, j int) bool { return n[i].Data < n[j].Data }
+func (n NodeSlice) Swap(i, j int)      { n[i], n[j] = n[j], n[i] }
+
 type DAG struct {
 	Nodes map[string]*Node
 }
@@ -125,16 +131,24 @@ func (dag *DAG) DFSPredecessors(startNode *Node, callback func(node *Node) bool)
 	dfsRecursive(startNode)
 }
 
-func (dag *DAG) TraverseGraphFromStart(startNode *Node) []*Node {
-	visited := make(map[*Node]bool)
+// TraverseGraphFromStart conducts a full traversal of the DAG, starting from startNode. It first applies
+// depth-first search (DFS) from startNode to explore reachable nodes. Subsequently, it ensures all nodes in the
+// DAG, including those in disconnected components, are visited by checking and performing DFS on unvisited nodes.
+// This guarantees complete coverage of the graph, making it ideal for operations needing a thorough exploration
+// or processing of all nodes, regardless of connectivity.
+//
+// startNode: The node from which traversal begins.
+// Returns: NodeSlice of all visited nodes, ensuring no node is overlooked.
+func (dag *DAG) TraverseGraphFromStart(startNode *Node) NodeSlice {
+	visited := make(map[string]bool)
 	var result []*Node
 
 	var dfsRecursive func(node *Node)
 	dfsRecursive = func(node *Node) {
-		if visited[node] {
+		if visited[node.Data] {
 			return
 		}
-		visited[node] = true
+		visited[node.Data] = true
 
 		result = append(result, node)
 
@@ -142,11 +156,10 @@ func (dag *DAG) TraverseGraphFromStart(startNode *Node) []*Node {
 			dfsRecursive(pred)
 		}
 	}
-
 	dfsRecursive(startNode)
 
 	for _, node := range dag.Nodes {
-		if !visited[node] {
+		if !visited[node.Data] {
 			dfsRecursive(node)
 		}
 	}

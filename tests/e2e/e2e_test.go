@@ -17,15 +17,16 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"github.com/videahealth/pg-snap/cmd/dump"
-	"github.com/videahealth/pg-snap/cmd/restore"
-	"github.com/videahealth/pg-snap/internal/utils"
+
+	"github.com/videahealth/pg-snap/cmd"
+	"github.com/videahealth/pg-snap/cmd/helpers"
+	"github.com/videahealth/pg-snap/config"
 )
 
 const restoreDbSqlPath string = "restore-dump.sql"
 const dumpTarFile string = "usada.tar.gz"
 
-func InitDb(ctx context.Context, db string, user string, pass string) (*postgres.PostgresContainer, utils.DbParams) {
+func InitDb(ctx context.Context, db string, user string, pass string) (*postgres.PostgresContainer, helpers.DbParams) {
 
 	postgresContainer, err := postgres.RunContainer(ctx,
 		testcontainers.WithImage("docker.io/postgres:15.2-alpine"),
@@ -66,7 +67,7 @@ func InitDb(ctx context.Context, db string, user string, pass string) (*postgres
 
 	int32Port := int32(num)
 
-	params := utils.DbParams{
+	params := helpers.DbParams{
 		Username: user,
 		Password: pass,
 		Host:     host,
@@ -136,13 +137,14 @@ func DumpDb(t *testing.T) {
 
 	ExecutePSQLCommand(db, user, pass, dbParams.Host, strconv.FormatInt(int64(dbParams.Port), 10))
 
-	programParams := utils.ProgramParams{
-		SkipTables:         "",
-		Concurrency:        4,
-		AskForConfirmation: false,
+	programParams := helpers.DumpOptions{
+		Concurrency: 4,
+		Config: &config.Config{
+			SkipTables: []string{},
+		},
 	}
 
-	if err := dump.RunCmd(dbParams, programParams); err != nil {
+	if err := cmd.RunDumpCmd(dbParams, programParams); err != nil {
 		t.Fatalf("Failed running dump cmd: %s", err)
 		return
 	}
@@ -157,8 +159,7 @@ func RestoreDb(t *testing.T) {
 		return
 	}
 
-	programParams := utils.ProgramParams{
-		SkipTables:         "",
+	programParams := helpers.RestoreOptions{
 		Concurrency:        4,
 		AskForConfirmation: false,
 		TarFilePath:        tarfile,
@@ -175,7 +176,7 @@ func RestoreDb(t *testing.T) {
 		}
 	}()
 
-	if err := restore.RunCmd(dbParams, programParams); err != nil {
+	if err := cmd.RunRestoreCmd(dbParams, programParams); err != nil {
 		t.Fatalf("Failed running restore cmd: %s", err)
 		return
 	}

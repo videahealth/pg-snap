@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	pg_query "github.com/pganalyze/pg_query_go/v5"
+	"github.com/videahealth/pg-snap/cmd/helpers"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
 	"github.com/videahealth/pg-snap/internal/utils"
 )
@@ -32,7 +33,7 @@ func NewPsql(fPath string) *DumpParser {
 	}
 }
 
-func (dp *DumpParser) Dump(params *utils.DbParams) error {
+func (dp *DumpParser) Dump(params *helpers.DbParams) error {
 	if err := dp.GeneratePgDump(params); err != nil {
 		return err
 	}
@@ -43,12 +44,12 @@ func (dp *DumpParser) Dump(params *utils.DbParams) error {
 	return nil
 }
 
-func (dp *DumpParser) Restore(params *utils.DbParams) error {
+func (dp *DumpParser) Restore(params *helpers.DbParams) error {
 	dp.SplitDDLWithFks()
 	return nil
 }
 
-func (dp *DumpParser) GeneratePgDump(params *utils.DbParams) error {
+func (dp *DumpParser) GeneratePgDump(params *helpers.DbParams) error {
 	if err := os.MkdirAll(dp.dumpFolder, os.ModePerm); err != nil {
 		return fmt.Errorf("error making directory %s: %s", dp.dumpFolder, err)
 	}

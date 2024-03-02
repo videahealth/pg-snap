@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"sync"
 	"sync/atomic"
 
 	"github.com/charmbracelet/log"
+	"github.com/videahealth/pg-snap/cmd/helpers"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
 	"github.com/videahealth/pg-snap/internal/relations"
@@ -21,24 +21,6 @@ type ParsedString struct {
 	Schema string
 	Table  string
 	Query  string
-}
-
-func parseSubsetInput(input string) (*ParsedString, error) {
-	pattern := `^(\w+)\.(\w+)\[([^\]]+)\]$`
-	re := regexp.MustCompile(pattern)
-
-	matches := re.FindStringSubmatch(input)
-	if matches == nil || len(matches) != 4 {
-		return nil, fmt.Errorf("input does not match the expected format")
-	}
-
-	result := &ParsedString{
-		Schema: matches[1],
-		Table:  matches[2],
-		Query:  matches[3],
-	}
-
-	return result, nil
 }
 
 func CompressDir(dir string, outFile string) error {
@@ -59,7 +41,7 @@ func CompressDir(dir string, outFile string) error {
 	return nil
 }
 
-func RunWithStrategy(p *utils.ProgramParams, d *utils.DbParams, pg *db.Db, tables []*db.Table) error {
+func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tables []*db.Table) error {
 
 	pgDbVersion := pg.GetVersion()
 	pgDumpVersion, err := pgcommand.GetPgCmdVersion("pg_dump")
@@ -77,18 +59,17 @@ func RunWithStrategy(p *utils.ProgramParams, d *utils.DbParams, pg *db.Db, table
 	root := "./data-dump"
 	defer os.RemoveAll(root)
 
-	if p.Subset != "" {
-		subsetOpts, err := parseSubsetInput(p.Subset)
+	if p.Config != nil {
+		maxRows := p.Config.Subset.MaxRowsPerTable
+		fmt.Println(maxRows)
+		subset, err := relations.NewSubset(pg, tables, p.Config.Subset.Table, p.Config.Subset.Schema, root, p.Config.Subset.Where, maxRows)
 		if err != nil {
 			return err
 		}
-		subset, err := relations.NewSubset(pg, tables, subsetOpts.Table, subsetOpts.Schema, root, subsetOpts.Query)
-		if err != nil {
-			return err
+		if err = subset.TraverseAndCopyData(); err != nil {
+			return fmt.Errorf("error subsetting data: %w", err)
 		}
-		subset.Visit()
 
-		return nil
 	} else {
 
 		log.Info("Running with", "concurrency", p.Concurrency)
@@ -119,9 +100,11 @@ func RunWithStrategy(p *utils.ProgramParams, d *utils.DbParams, pg *db.Db, table
 
 		wg.Wait()
 
-		if err = CompressDir(root, fmt.Sprintf("./%s.tar.gz", d.Db)); err != nil {
-			return err
-		}
 	}
+
+	if err = CompressDir(root, fmt.Sprintf("./%s.tar.gz", d.Db)); err != nil {
+		return err
+	}
+
 	return nil
 }
