@@ -1,11 +1,8 @@
 package strategy
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"sync"
 	"sync/atomic"
 
@@ -23,25 +20,7 @@ type ParsedString struct {
 	Query  string
 }
 
-func CompressDir(dir string, outFile string) error {
-	var buf bytes.Buffer
-	err := utils.Compress(dir, &buf)
-	if err != nil {
-		return err
-	}
-
-	fileToWrite, err := os.OpenFile(outFile, os.O_CREATE|os.O_RDWR, os.FileMode(0600))
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(fileToWrite, &buf); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tables []*db.Table) error {
+func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tables []*db.Table, workingDir string) error {
 
 	pgDbVersion := pg.GetVersion()
 	pgDumpVersion, err := pgcommand.GetPgCmdVersion("pg_dump")
@@ -56,13 +35,10 @@ func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tab
 		return errors.New("major postgres version does not match pg_dump")
 	}
 
-	root := "./data-dump"
-	defer os.RemoveAll(root)
-
 	if p.Config != nil && p.Config.Subset.Table != "" {
 		maxRows := p.Config.Subset.MaxRowsPerTable
 		fmt.Println(maxRows)
-		subset, err := relations.NewSubset(pg, tables, p.Config.Subset.Table, p.Config.Subset.Schema, root, p.Config.Subset.Where, maxRows)
+		subset, err := relations.NewSubset(pg, tables, p.Config.Subset.Table, p.Config.Subset.Schema, workingDir, p.Config.Subset.Where, maxRows)
 		if err != nil {
 			return err
 		}
@@ -90,7 +66,7 @@ func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tab
 
 				log.Debug(utils.SprintfNoNewlines("COPYING data from table %s", tbl.Details.Display))
 
-				rows := tbl.PerformCopy(root, "")
+				rows := tbl.PerformCopy(workingDir, "")
 
 				utils.DisplayProgress(&ops, rows, total, tbl.Details.Display)
 
@@ -100,10 +76,6 @@ func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tab
 
 		wg.Wait()
 
-	}
-
-	if err = CompressDir(root, fmt.Sprintf("./%s.tar.gz", d.Db)); err != nil {
-		return err
 	}
 
 	return nil

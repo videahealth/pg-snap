@@ -132,12 +132,12 @@ func (s *Subset) TraverseAndCopyData() error {
 			if vis && copiedData[p.Data] {
 				var q string
 				if visitMode == VisitSuccessors {
-					q, err = BuildSuccessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+					q, err = BuildSuccessorQuery(p.Data, node.Data, s.Relations, s.Tables, s.RootFolder)
 					if err != nil {
 						return err
 					}
 				} else {
-					q, err = BuildPredecessorQuery(p.Data, node.Data, s.Relations, s.Tables)
+					q, err = BuildPredecessorQuery(p.Data, node.Data, s.Relations, s.Tables, s.RootFolder)
 					if err != nil {
 						return err
 					}
@@ -193,7 +193,7 @@ func (s *Subset) TraverseAndCopyData() error {
 	return nil
 }
 
-func GetTableDetailsAndCsvPath(tables []*db.Table, toCopyId string, foreignTableId string) (toCopy *db.Table, foreignTable *db.Table, foreignTableCsvPath string, err error) {
+func GetTableDetailsAndCsvPath(tables []*db.Table, toCopyId string, foreignTableId string, dir string) (toCopy *db.Table, foreignTable *db.Table, foreignTableCsvPath string, err error) {
 	toCopy, err = GetTable(tables, toCopyId)
 	if err != nil {
 		log.Fatalf("error getting table: %s", err)
@@ -202,7 +202,7 @@ func GetTableDetailsAndCsvPath(tables []*db.Table, toCopyId string, foreignTable
 	if err != nil {
 		log.Fatalf("error getting table: %s", err)
 	}
-	foreignTableCsvPath = filepath.Join("./data-dump", foreignTable.Details.Display, "data.csv")
+	foreignTableCsvPath = filepath.Join(dir, foreignTable.Details.Display, "data.csv")
 	return
 }
 
@@ -243,8 +243,8 @@ func BuildConditions(toCopyId string, foreignTableCsvPath string, cols []db.Fore
 	return conditions, nil
 }
 
-func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) (string, error) {
-	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId)
+func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table, dir string) (string, error) {
+	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId, dir)
 	if err != nil {
 		log.Fatalf("error in preparation: %s", err)
 	}
@@ -262,8 +262,8 @@ func BuildSuccessorQuery(foreignTableId string, toCopyId string, relations []db.
 	return "", nil
 }
 
-func BuildPredecessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table) (string, error) {
-	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId)
+func BuildPredecessorQuery(foreignTableId string, toCopyId string, relations []db.ForeignKeyInfo, tables []*db.Table, dir string) (string, error) {
+	toCopy, foreignTable, foreignTableCsvPath, err := GetTableDetailsAndCsvPath(tables, toCopyId, foreignTableId, dir)
 	if err != nil {
 		log.Fatalf("error in preparation: %s", err)
 	}

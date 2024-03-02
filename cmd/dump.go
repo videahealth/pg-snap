@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 	"github.com/videahealth/pg-snap/cmd/helpers"
+	"github.com/videahealth/pg-snap/internal/connector"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/strategy"
 )
@@ -38,8 +39,22 @@ func RunDumpCmd(dbParams helpers.DbParams, programParams helpers.DumpOptions) er
 
 	log.Info("Extracting database DDL")
 
-	dp := db.NewPsql("./data-dump")
-	err := dp.Dump(&dbParams)
+	dmp, err := connector.NewLocal()
+	if err != nil {
+		return fmt.Errorf("error configuring project directory: %w", err)
+	}
+
+	if err = dmp.NewDump(); err != nil {
+		return fmt.Errorf("error configuring project directory: %w", err)
+	}
+
+	workingDir, err := dmp.GetLatestDir()
+	if err != nil {
+		return fmt.Errorf("error configuring project directory: %w", err)
+	}
+
+	dp := db.NewPsql(workingDir)
+	err = dp.Dump(&dbParams)
 	if err != nil {
 		return fmt.Errorf("error generating dump: %w", err)
 	}
@@ -55,7 +70,7 @@ func RunDumpCmd(dbParams helpers.DbParams, programParams helpers.DumpOptions) er
 	skipTables := helpers.ParseSkipTables(skipTablesStr)
 	tables := pg.GetAllTables(skipTables)
 
-	if err = strategy.RunWithStrategy(&programParams, &dbParams, pg, tables); err != nil {
+	if err = strategy.RunWithStrategy(&programParams, &dbParams, pg, tables, workingDir); err != nil {
 		return err
 	}
 

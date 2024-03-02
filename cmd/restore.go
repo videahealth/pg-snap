@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
 	"github.com/videahealth/pg-snap/cmd/helpers"
+	"github.com/videahealth/pg-snap/internal/connector"
 	"github.com/videahealth/pg-snap/internal/db"
 	"github.com/videahealth/pg-snap/internal/pgcommand"
 	"github.com/videahealth/pg-snap/internal/utils"
@@ -51,22 +52,6 @@ func IsExtTable(exts []db.ExtTable, table *db.Table) bool {
 		}
 	}
 	return false
-}
-
-func DecompressDir(filePath string, out string) error {
-	file, err := os.Open(filePath)
-
-	if err != nil {
-		return err
-	}
-
-	err = utils.Decompress(file, out)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func ReadFromFileAndWriteToDb(path string, table *db.Table, pg *db.Db, isExtTable bool, ops *atomic.Uint64, total int) error {
@@ -140,20 +125,29 @@ func RunRestoreCmd(dbParams helpers.DbParams, programParams helpers.RestoreOptio
 
 	var inputFile string
 
-	if programParams.TarFilePath == "" {
-		inputFile = fmt.Sprintf("./%s.tar.gz", dbParams.Db)
-	} else {
+	if programParams.TarFilePath != "" {
 		inputFile = programParams.TarFilePath
 		if _, err := os.Stat(inputFile); errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("given input file %s does not exist", inputFile)
 		}
 	}
-	root := "./data-dump"
-	defer os.RemoveAll(root)
-	dp := db.NewPsql(root)
-	if err := DecompressDir(inputFile, "."); err != nil {
-		return err
+
+	dmp, err := connector.NewLocal()
+
+	if err != nil {
+		return fmt.Errorf("error reading project directory: %w", err)
 	}
+
+	if err = dmp.Decompress(inputFile); err != nil {
+		return fmt.Errorf("error reading project directory: %w", err)
+	}
+
+	workingDir, err := dmp.GetLatestDir()
+	if err != nil {
+		return fmt.Errorf("error reading project directory: %w", err)
+	}
+
+	dp := db.NewPsql(workingDir)
 
 	dp.SplitDDLWithFks()
 
@@ -174,7 +168,7 @@ func RunRestoreCmd(dbParams helpers.DbParams, programParams helpers.RestoreOptio
 		return errors.New("major postgres version does not match pg_dump")
 	}
 
-	tables, err := LoadPgTables(root, pg)
+	tables, err := LoadPgTables(workingDir, pg)
 
 	if err != nil {
 		return err
@@ -188,7 +182,7 @@ func RunRestoreCmd(dbParams helpers.DbParams, programParams helpers.RestoreOptio
 		return err
 	}
 
-	ddlPath, err := filepath.Abs(filepath.Join(root, "rem.sql"))
+	ddlPath, err := filepath.Abs(filepath.Join(workingDir, "rem.sql"))
 	if err != nil {
 		return err
 	}
@@ -217,7 +211,7 @@ func RunRestoreCmd(dbParams helpers.DbParams, programParams helpers.RestoreOptio
 			defer wg.Done()
 
 			isExtention := IsExtTable(extTables, &tbl)
-			dirPath := filepath.Join(root, tbl.Details.Display, "data.csv")
+			dirPath := filepath.Join(workingDir, tbl.Details.Display, "data.csv")
 
 			if err := ReadFromFileAndWriteToDb(dirPath, &tbl, pg, isExtention, &ops, total); err != nil {
 				log.Error("Error copying for table %s: %s", tbl.Details.Display, err)
@@ -230,7 +224,7 @@ func RunRestoreCmd(dbParams helpers.DbParams, programParams helpers.RestoreOptio
 
 	log.Info("Loading database DDL")
 
-	fksPath, err := filepath.Abs(filepath.Join(root, "fk.sql"))
+	fksPath, err := filepath.Abs(filepath.Join(workingDir, "fk.sql"))
 	if err != nil {
 		return err
 	}
