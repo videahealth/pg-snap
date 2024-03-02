@@ -121,7 +121,7 @@ func CalculateFileSHA256(filepath string) (string, error) {
 	return hex.EncodeToString(hash), nil
 }
 
-func DumpDb(t *testing.T) {
+func DumpDb(t *testing.T, cfg *config.Config) {
 	ctx := context.Background()
 
 	db := "usada"
@@ -139,9 +139,7 @@ func DumpDb(t *testing.T) {
 
 	programParams := helpers.DumpOptions{
 		Concurrency: 4,
-		Config: &config.Config{
-			SkipTables: []string{},
-		},
+		Config:      cfg,
 	}
 
 	if err := cmd.RunDumpCmd(dbParams, programParams); err != nil {
@@ -150,13 +148,13 @@ func DumpDb(t *testing.T) {
 	}
 }
 
-func RestoreDb(t *testing.T) {
+func RestoreDb(t *testing.T) string {
 	ctx := context.Background()
 
 	tarfile, err := filepath.Abs(dumpTarFile)
 	if err != nil {
 		t.Fatalf("Error getting abs path for tarfile: %s", err)
-		return
+		return ""
 	}
 
 	programParams := helpers.RestoreOptions{
@@ -178,7 +176,7 @@ func RestoreDb(t *testing.T) {
 
 	if err := cmd.RunRestoreCmd(dbParams, programParams); err != nil {
 		t.Fatalf("Failed running restore cmd: %s", err)
-		return
+		return ""
 	}
 
 	ExecutePGDumpCommand(dbParams.Db, user, pass, dbParams.Host, strconv.FormatInt(int64(dbParams.Port), 10), restoreDbSqlPath)
@@ -189,17 +187,33 @@ func RestoreDb(t *testing.T) {
 		t.Fatalf("error calculating hash: %s", err)
 	}
 
-	if hash != "dabf683eaba5f261dbc088d32829e2d967507643063f7b3353ed417c85d31c0e" {
-		t.Fatal("restore hash does not match expected")
-	}
+	return hash
 }
 
 func TestE2E(t *testing.T) {
 	if os.Getenv("TEST") != "e2e" {
 		t.Skip("Skipping testing in CI environment")
 	}
-	DumpDb(t)
-	RestoreDb(t)
+
+	DumpDb(t, &config.Config{
+		SkipTables: []string{},
+	})
+	if hash := RestoreDb(t); hash != "204b58b5dba7c579c4ff6d24b6f678c31e84fcf1f8b5665689706d218ffd6ce8" {
+		t.Fatalf("restore hash does not match expected: %s", hash)
+	}
+
+	var config config.Config
+
+	config.Subset.Table = "nut_data"
+	config.Subset.Schema = "public"
+	config.Subset.Where = "ndb_no = '02014'"
+	config.SkipTables = []string{}
+
+	DumpDb(t, &config)
+	if hash := RestoreDb(t); hash != "cf883d4c9ca2c2c6ea247e4d5bec054ac1ebbb5ecb83aeafc40e6c22890390f1" {
+		t.Fatalf("restore hash does not match expected: %s", hash)
+	}
+
 	t.Cleanup(func() {
 		if err := os.Remove(restoreDbSqlPath); err != nil {
 			fmt.Println("Error cleaning up file", dumpTarFile)

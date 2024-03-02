@@ -80,7 +80,11 @@ func (s *Subset) TraverseAndCopyData() error {
 
 	copiedData := make(map[string]bool)
 	gVisited := make(map[string]bool)
-	startNode := s.DAG.FindNodeByData(db.NormalizeName(s.StartTableSchema, s.StartTableName))
+	startTable := db.NormalizeName(s.StartTableSchema, s.StartTableName)
+	startNode := s.DAG.FindNodeByData(startTable)
+	if startNode == nil {
+		return fmt.Errorf("table %s not found in database", startTable)
+	}
 	newDAG := s.DAG.FindClosedSystemFullDAG(startNode)
 	var ops atomic.Uint64
 	total := len(s.Tables)
@@ -164,7 +168,6 @@ func (s *Subset) TraverseAndCopyData() error {
 		if totalCopied >= len(newDAG.Nodes) {
 			break
 		}
-
 		for _, node := range nodes {
 			if !copiedData[node.Data] {
 				if err := visitNode(node, VisitPredecessors); err != nil {

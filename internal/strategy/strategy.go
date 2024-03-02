@@ -59,7 +59,7 @@ func RunWithStrategy(p *helpers.DumpOptions, d *helpers.DbParams, pg *db.Db, tab
 	root := "./data-dump"
 	defer os.RemoveAll(root)
 
-	if p.Config != nil {
+	if p.Config != nil && p.Config.Subset.Table != "" {
 		maxRows := p.Config.Subset.MaxRowsPerTable
 		fmt.Println(maxRows)
 		subset, err := relations.NewSubset(pg, tables, p.Config.Subset.Table, p.Config.Subset.Schema, root, p.Config.Subset.Where, maxRows)
