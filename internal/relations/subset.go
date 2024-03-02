@@ -53,6 +53,8 @@ func NewSubset(pg *db.Db, tables []*db.Table, startTable, startSchema, rootFolde
 	var maxRows int32
 	if maxRowsPerTable == 0 {
 		maxRows = -1
+	} else {
+		maxRows = maxRowsPerTable
 	}
 
 	return &Subset{

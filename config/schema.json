@@ -13,6 +13,9 @@
         },
         "where": {
           "type": "string"
+        },
+        "maxRowsPerTable": {
+          "type": "number"
         }
       },
       "required": ["table", "schema", "where"]

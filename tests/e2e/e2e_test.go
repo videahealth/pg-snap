@@ -207,10 +207,11 @@ func TestE2E(t *testing.T) {
 	config.Subset.Table = "nut_data"
 	config.Subset.Schema = "public"
 	config.Subset.Where = "ndb_no = '02014'"
+	config.Subset.MaxRowsPerTable = 10
 	config.SkipTables = []string{}
 
 	DumpDb(t, &config)
-	if hash := RestoreDb(t); hash != "cf883d4c9ca2c2c6ea247e4d5bec054ac1ebbb5ecb83aeafc40e6c22890390f1" {
+	if hash := RestoreDb(t); hash != "c44022fe22f1e0841d7a8d18f913a04917ac3d8f28601024e08503e3e42740dc" {
 		t.Fatalf("restore hash does not match expected: %s", hash)
 	}
 
