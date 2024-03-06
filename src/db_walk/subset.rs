@@ -82,14 +82,14 @@ impl Subset {
                 VisitMode::Successor => &fk.foreign_col_type,
             };
 
-            let data = read_csv_column_by_name(foreign_table_csv_path, &csv_col)?;
-            if data.len() == 0 {
+            let data = read_csv_column_by_name(foreign_table_csv_path, csv_col)?;
+            if data.is_empty() {
                 continue;
             }
 
             let col_data = format_cols(data, &fk_col_type)?;
 
-            if col_data.len() == 0 {
+            if col_data.is_empty() {
                 continue;
             }
 
@@ -121,7 +121,7 @@ impl Subset {
         let conditions =
             self.build_conditions(foreign_table_csv_path, &fks, VisitMode::Successor)?;
 
-        if conditions.len() > 0 {
+        if conditions.is_empty() {
             return Ok(Some(conditions.join(" OR ")));
         }
 
@@ -167,7 +167,7 @@ impl Subset {
         let visiting_table = self
             .tables
             .iter()
-            .find(|t| t.id == visiting_table_id.to_owned())
+            .find(|t| t.id == *visiting_table_id)
             .ok_or(anyhow!("Error finding tabe"))?;
 
         // visited_map.
@@ -192,8 +192,8 @@ impl Subset {
 
         let mut conditions: Vec<String> = Vec::new();
         let query_nodes = match visit_mode {
-            VisitMode::Predecessor => find_predecessors(&self.dag, node.clone()),
-            VisitMode::Successor => find_children(&self.dag, node.clone()),
+            VisitMode::Predecessor => find_predecessors(&self.dag, *node),
+            VisitMode::Successor => find_children(&self.dag, *node),
         };
 
         for query_node in query_nodes {
@@ -274,14 +274,14 @@ impl Subset {
 
                 if !copied_data.contains(table_id) {
                     self.visit_node(
-                        &node,
+                        node,
                         VisitMode::Predecessor,
                         &mut visited_data,
                         &mut copied_data,
                     )
                     .await?;
                     self.visit_node(
-                        &node,
+                        node,
                         VisitMode::Successor,
                         &mut visited_data,
                         &mut copied_data,

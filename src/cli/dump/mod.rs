@@ -57,7 +57,7 @@ impl Command for DumpCmd {
             .context("Error running pg_dump command")?;
 
         let config: Option<Config> = if let Some(cfg_path) = &self.config {
-            Some(load_config(&cfg_path)?)
+            Some(load_config(cfg_path)?)
         } else {
             None
         };
@@ -75,7 +75,7 @@ impl Command for DumpCmd {
         let relations = dump_parser.relations.clone();
 
         dump_parser
-            .split_fk_constraints(&root_dir)
+            .split_fk_constraints(root_dir)
             .context("Error parsing dump file fk contraints")?;
 
         let subset_config = match config {

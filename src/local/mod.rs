@@ -20,10 +20,10 @@ impl Local {
     pub fn new(name: &str) -> Local {
         let root = Path::new(".").join(name);
         let root_path = PathBuf::from(root);
-        return Local {
+        Local {
             root_path,
             output_name: name.to_owned(),
-        };
+        }
     }
 
     pub fn load(name: &str) -> Result<Local> {

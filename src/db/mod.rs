@@ -298,8 +298,8 @@ impl<'a> DumpParser<'a> {
         let fk_content_path = Path::new(root_dir).join("foreign_keys.sql");
         let ddl_content_path = Path::new(root_dir).join("ddl.sql");
 
-        let _ = fs::write(fk_content_path, fk_constraints)?;
-        let _ = fs::write(ddl_content_path, remaining_content)?;
+        fs::write(fk_content_path, fk_constraints)?;
+        fs::write(ddl_content_path, remaining_content)?;
         fs::remove_file(self.path)?;
 
         Ok(())
@@ -364,7 +364,7 @@ pub fn get_tables_and_foreign_keys(
                 let cols = &v.table_elts;
 
                 let table_cols: Vec<Col> = cols
-                    .into_iter()
+                    .iter()
                     .filter_map(|col| {
                         col.node.as_ref().and_then(|node_val| {
                             if let pg_query::NodeEnum::ColumnDef(cd) = node_val {

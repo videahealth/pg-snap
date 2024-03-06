@@ -21,7 +21,7 @@ pub fn get_node_index_from_data(graph: &DiGraph<String, ()>, start_node_data: &s
         .get(&start_node_data.to_string())
         .expect("Start node not found");
 
-    node.clone()
+    *node
 }
 
 pub fn find_closed_system_full_dag(

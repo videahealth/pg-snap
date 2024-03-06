@@ -94,7 +94,7 @@ impl Command for RestoreCmd {
         for tbl in tables {
             let ext_tables_set_clone = ext_tables_set.clone();
             let database = new_db.clone();
-            let latest_dir_clone = PathBuf::from(latest_dir.clone());
+            let latest_dir_clone = latest_dir.clone();
 
             while join_set.len() >= concurrency {
                 let _ = join_set.join_next().await.unwrap().unwrap();
@@ -144,11 +144,11 @@ impl Command for RestoreCmd {
         match new_db.write_table_sequences().await {
             Err(e) => {
                 warn!("Error executing SEQ updates: {}", e);
-                return Ok(());
+                Ok(())
             }
             Ok(_) => {
                 info!("Executed SEQ updates");
-                return Ok(());
+                Ok(())
             }
         }
     }
