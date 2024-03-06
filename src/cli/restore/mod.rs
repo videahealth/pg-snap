@@ -76,18 +76,21 @@ impl Command for RestoreCmd {
         new_db.recreate_database().await?;
 
         let ddl_path = Path::new(&latest_dir).join("ddl.sql");
+        let fk_path = Path::new(&latest_dir).join("foreign_keys.sql");
+
         let ddl_path_str = ddl_path.to_str().ok_or(anyhow!("Error getting DDL path"))?;
+        let fk_path_str = fk_path.to_str().ok_or(anyhow!("Error getting FK path"))?;
 
         let pg_command = PgCommand::new(&self.db);
 
+        info!("Applying database DDL");
         pg_command
             .restore(ddl_path_str)
             .context("Error running psql command")?;
 
         let mut join_set: JoinSet<Result<(), JoinError>> = JoinSet::new();
 
-        println!("Tables: {}", tables.len());
-
+        info!("Restoring {} tables", tables.len());
         for tbl in tables {
             let ext_tables_set_clone = ext_tables_set.clone();
             let database = new_db.clone();
@@ -134,7 +137,20 @@ impl Command for RestoreCmd {
 
         fs::remove_dir_all(local.root_path)?;
 
-        Ok(())
+        pg_command
+            .restore(fk_path_str)
+            .context("Error running psql command")?;
+
+        match new_db.write_table_sequences().await {
+            Err(e) => {
+                warn!("Error executing SEQ updates: {}", e);
+                return Ok(());
+            }
+            Ok(_) => {
+                info!("Executed SEQ updates");
+                return Ok(());
+            }
+        }
     }
 }
 

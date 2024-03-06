@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::{
     config::{load_config, Config},
     db::{Db, DumpParser},
@@ -7,6 +5,8 @@ use crate::{
     local::Local,
     pg_command::PgCommand,
 };
+use log::info;
+use std::path::PathBuf;
 
 use super::{Command, DbParams, Dump};
 use anyhow::{Context, Result};
@@ -51,6 +51,7 @@ impl Command for DumpCmd {
 
         let dump_file = local.get_dump_file().context("Error loading dump file")?;
 
+        info!("Introspecing db and taking snapshot");
         pg_command
             .dump(&dump_file)
             .context("Error running pg_dump command")?;
