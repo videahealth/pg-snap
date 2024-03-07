@@ -4,6 +4,7 @@ use crate::db::Db;
 use crate::db_walk::copy_data;
 use crate::utils::csv::read_csv_column_by_name;
 use anyhow::{anyhow, Result};
+use petgraph::dot::{Config, Dot};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use super::dag::{
     find_children, find_closed_system_full_dag, find_predecessors, get_node_index_from_data,
     traverse_graph_from_start,
 };
+use super::dag_custom::{Node, DAG};
 
 #[derive(PartialEq, Debug)]
 enum VisitMode {
@@ -19,12 +21,27 @@ enum VisitMode {
     Successor,
 }
 
+pub fn build_relations(relations: Vec<ForeignKeyInfo>) -> DAG {
+    let mut dag = DAG::new();
+
+    for rel in relations {
+        let node1_data = rel.source_table_id;
+        let node2_data = rel.foreign_table_id;
+
+        // The Rust implementation directly uses the data to add edges.
+        // Node creation or retrieval is implicitly handled within `add_edge`.
+        dag.add_edge(node1_data.clone(), node2_data);
+    }
+
+    dag
+}
+
 pub struct Subset {
     relations: Vec<ForeignKeyInfo>,
     tables: Vec<Table>,
     start_table_id: String,
     subset_query: String,
-    dag: DiGraph<String, ()>,
+    dag: DAG,
     root_folder: PathBuf,
     max_rows_per_table: Option<i32>,
     db: Db,
@@ -41,7 +58,7 @@ impl Subset {
         max_rows_per_table: Option<i32>,
         subset_query_where: String,
     ) -> Self {
-        let dag = build_relations(&relations);
+        let dag = build_relations(relations);
         let start_table_id = format!("\"{}\".\"{}\"", start_table_schema, start_table_name);
         let subset_query = format!(
             "SELECT * FROM {} WHERE {}",
@@ -111,6 +128,8 @@ impl Subset {
             .find(|t| t.id == foreign_table_id)
             .ok_or(anyhow!("Error finding tabe"))?;
 
+        println!("build_successor_query: {}", main_table_id);
+
         let fks = get_table_fk(foreign_table_id, main_table_id, &self.relations);
         let foreign_table_csv_pathbuf = foreign_table.get_data_dir(&self.root_folder)?;
 
@@ -121,7 +140,7 @@ impl Subset {
         let conditions =
             self.build_conditions(foreign_table_csv_path, &fks, VisitMode::Successor)?;
 
-        if conditions.is_empty() {
+        if !conditions.is_empty() {
             return Ok(Some(conditions.join(" OR ")));
         }
 
@@ -139,6 +158,8 @@ impl Subset {
             .find(|t| t.id == foreign_table_id)
             .ok_or(anyhow!("Error finding tabe"))?;
 
+        println!("build_predecessor_query: {}", main_table_id);
+
         let fks = get_table_fk(main_table_id, foreign_table_id, &self.relations);
         let foreign_table_csv_pathbuf = foreign_table.get_data_dir(&self.root_folder)?;
 
@@ -147,9 +168,9 @@ impl Subset {
             .ok_or(anyhow!("Unable to get csv path for foreign table"))?;
 
         let conditions =
-            self.build_conditions(foreign_table_csv_path, &fks, VisitMode::Successor)?;
+            self.build_conditions(foreign_table_csv_path, &fks, VisitMode::Predecessor)?;
 
-        if conditions.len() > 0 {
+        if !conditions.is_empty() {
             return Ok(Some(conditions.join(" OR ")));
         }
 
@@ -158,12 +179,12 @@ impl Subset {
 
     async fn visit_node(
         &self,
-        node: &NodeIndex,
+        node: &Node,
         visit_mode: VisitMode,
         visited_map: &mut HashSet<String>,
         copied_map: &mut HashSet<String>,
     ) -> Result<()> {
-        let visiting_table_id: &String = &self.dag[node.to_owned()];
+        let visiting_table_id = &node.data;
         let visiting_table = self
             .tables
             .iter()
@@ -193,8 +214,10 @@ impl Subset {
         let mut conditions: Vec<String> = Vec::new();
         let query_nodes = match visit_mode {
             VisitMode::Predecessor => find_predecessors(&self.dag, *node),
-            VisitMode::Successor => find_children(&self.dag, *node),
+            VisitMode::Successor => node.children,
         };
+
+        println!("Visiting: {}", visiting_table_id);
 
         for query_node in query_nodes {
             let table_id: &String = &self.dag[query_node.to_owned()];
@@ -254,13 +277,12 @@ impl Subset {
         let mut copied_data: HashSet<String> = HashSet::new();
         let mut visited_data: HashSet<String> = HashSet::new();
 
-        let ni = get_node_index_from_data(&self.dag, &self.start_table_id);
+        let start_node = self.dag.find_node_by_data(&self.start_table_id);
 
-        let closed_system_dag = find_closed_system_full_dag(&self.dag, ni);
+        let new_dag = self.dag.find_closed_system_full_dag(&self.start_table_id);
+        let nodes = new_dag.traverse_graph_from_start(&self.start_table_id);
 
-        let visited_from_start = traverse_graph_from_start(&closed_system_dag, ni);
-
-        let total = visited_from_start.len();
+        let total = nodes.len();
 
         loop {
             let total_copied = &copied_data.len();
@@ -269,10 +291,10 @@ impl Subset {
                 break;
             }
 
-            for node in &visited_from_start {
-                let table_id: &String = &self.dag[node.to_owned()];
+            for node in nodes {
+                let table_id = node.data;
 
-                if !copied_data.contains(table_id) {
+                if !copied_data.contains(&table_id) {
                     self.visit_node(
                         node,
                         VisitMode::Predecessor,
@@ -307,7 +329,7 @@ fn format_cols(data: Vec<String>, col_type: &str) -> Result<String> {
             continue;
         }
         match category {
-            &"String types" | &"UUID types" | &"varchar" => {
+            &"String types" | &"UUID types" | &"varchar" | &"User-defined types" => {
                 data_vals.push(format!("'{}'", d));
             }
             &"Numeric types" | &"Integer types" => {

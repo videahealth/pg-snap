@@ -1,0 +1,2 @@
+id,createdAt,updatedAt,deletedAt,practicePatientId,practiceId,organizationId,name,dateOfBirth,sex,videaId,sourceImageAcquiredAt,chartNum,folderHash
+5243,2023-12-08 19:44:23.024019+00,2023-12-08 19:44:23.024019+00,,aud2gj3c15wa81343061ngt97wbfib,6217dc7a04809c1afd525a78,6217dc3904809c1afd525a75,Mohammad Okeke,,F,e2d0459d-5edd-42e5-b183-9964b26a284e,2023-12-08 19:43:07+00,,

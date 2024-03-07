@@ -26,12 +26,8 @@ pub fn load_config(path: &PathBuf) -> Result<Config> {
         .read_to_end(&mut bytes)
         .context("Error reading config file")?;
 
-    let mut config: Config =
+    let config: Config =
         serde_json::from_slice(&bytes).context("Error deserializing config file")?;
-
-    if config.subset.max_rows_per_table.is_none() {
-        config.subset.max_rows_per_table = Some(-1);
-    }
 
     Ok(config)
 }
