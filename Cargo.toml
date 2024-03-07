@@ -14,7 +14,6 @@ sqlx = { version = "0.7.2", features = [
     "runtime-tokio-native-tls",
 ] }
 pg_query = "5.1"
-petgraph = "0.6.4"
 tokio = { version = "1.32.0", features = ["full"] }
 futures-util = "0.3"
 futures-macro = "=0.3.30"

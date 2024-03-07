@@ -1,131 +1,145 @@
-use std::collections::VecDeque;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use petgraph::visit::EdgeRef;
-use petgraph::visit::IntoNodeIdentifiers;
-use petgraph::visit::VisitMap;
-use petgraph::visit::Visitable;
-use petgraph::{
-    graph::{DiGraph, NodeIndex},
-    Direction,
-};
-
-pub fn get_node_index_from_data(graph: &DiGraph<String, ()>, start_node_data: &str) -> NodeIndex {
-    let mut data_to_index: HashMap<&String, NodeIndex> = HashMap::new();
-    for node_index in graph.node_indices() {
-        let data = &graph[node_index];
-        data_to_index.insert(data, node_index);
-    }
-
-    let node = data_to_index
-        .get(&start_node_data.to_string())
-        .expect("Start node not found");
-
-    *node
+#[derive(Debug, Clone)]
+pub struct Node {
+    pub data: String,
+    pub children: Vec<Node>,
 }
 
-pub fn find_closed_system_full_dag(
-    graph: &DiGraph<String, ()>,
-    start_node: NodeIndex,
-) -> DiGraph<String, ()> {
-    let mut visited = graph.visit_map();
-    let mut to_visit = VecDeque::new();
-    let mut connected_nodes = HashSet::new();
-
-    to_visit.push_back(start_node);
-    while let Some(node) = to_visit.pop_front() {
-        if !visited.visit(node) {
-            continue;
+impl Node {
+    pub fn new(data: String) -> Self {
+        Node {
+            data,
+            children: Vec::new(),
         }
-        connected_nodes.insert(node);
+    }
+}
 
-        for neighbor in graph.neighbors_directed(node, Direction::Outgoing) {
-            if !visited.is_visited(&neighbor) {
-                to_visit.push_back(neighbor);
-            }
-        }
+#[derive(Debug)]
+pub struct DAG {
+    pub nodes: HashMap<String, Node>,
+}
 
-        for neighbor in graph.neighbors_directed(node, Direction::Incoming) {
-            if !visited.is_visited(&neighbor) {
-                to_visit.push_back(neighbor);
-            }
+impl DAG {
+    pub fn new() -> Self {
+        DAG {
+            nodes: HashMap::new(),
         }
     }
 
-    // Reconstruct the graph with only the connected nodes
-    let mut new_graph = DiGraph::new();
-    let mut old_to_new = std::collections::HashMap::new();
-
-    for &node in &connected_nodes {
-        let data = graph.node_weight(node).unwrap().clone();
-        let new_node = new_graph.add_node(data);
-        old_to_new.insert(node, new_node);
+    pub fn create_or_get_node(&mut self, data: String) -> &Node {
+        self.nodes
+            .entry(data.clone())
+            .or_insert_with(|| Node::new(data))
     }
 
-    for &node in &connected_nodes {
-        if let Some(&new_node) = old_to_new.get(&node) {
-            for edge in graph.edges(node) {
-                let target = edge.target();
-                if connected_nodes.contains(&target) {
-                    if let Some(&new_target) = old_to_new.get(&target) {
-                        new_graph.add_edge(new_node, new_target, ());
-                    }
+    pub fn add_edge(&mut self, parent_data: String, child_data: String) {
+        let nodes = self.nodes.clone();
+        if let Some(parent_node) = self.nodes.get_mut(&parent_data) {
+            let exists = parent_node
+                .children
+                .iter()
+                .any(|child| child.data == child_data);
+
+            if !exists {
+                if let Some(child_node) = nodes.get(&child_data) {
+                    parent_node.children.push(child_node.clone());
                 }
             }
         }
     }
 
-    new_graph
-}
+    pub fn find_closed_system_full_dag(&self, start_data: &str) -> DAG {
+        let mut connected = std::collections::HashSet::new();
+        let mut stack = vec![start_data];
 
-pub fn find_children(graph: &DiGraph<String, ()>, node_index: NodeIndex) -> Vec<NodeIndex> {
-    graph
-        .neighbors_directed(node_index, Direction::Outgoing)
-        .collect()
-}
+        while let Some(current_data) = stack.pop() {
+            if !connected.insert(current_data.to_string()) {
+                continue;
+            }
 
-pub fn find_predecessors(graph: &DiGraph<String, ()>, node_index: NodeIndex) -> Vec<NodeIndex> {
-    graph
-        .neighbors_directed(node_index, Direction::Incoming)
-        .collect()
-}
+            if let Some(node) = self.nodes.get(current_data) {
+                for child in &node.children {
+                    stack.push(&child.data);
+                }
+            }
 
-pub fn traverse_graph_from_start(
-    graph: &DiGraph<String, ()>,
-    start_node: NodeIndex,
-) -> Vec<NodeIndex> {
-    let mut visited = HashSet::new();
-    let mut result = Vec::new();
+            for (data, possible_parent) in &self.nodes {
+                if possible_parent
+                    .children
+                    .iter()
+                    .any(|child| child.data == current_data)
+                {
+                    stack.push(data);
+                }
+            }
+        }
 
-    // Custom DFS that considers both forward and backward edges
-    fn dfs_recursive(
-        node: petgraph::prelude::NodeIndex,
-        graph: &DiGraph<String, ()>,
-        visited: &mut HashSet<petgraph::prelude::NodeIndex>,
-        result: &mut Vec<petgraph::prelude::NodeIndex>,
+        let mut new_dag = DAG::new();
+        for node_data in connected.iter() {
+            if let Some(original_node) = self.nodes.get(node_data) {
+                let new_node = Node::new(original_node.data.clone());
+                new_dag.nodes.insert(new_node.data.clone(), new_node);
+            }
+        }
+
+        for (data, _) in new_dag.nodes.clone() {
+            if let Some(original_node) = self.nodes.get(&data) {
+                for original_child in &original_node.children {
+                    if new_dag.nodes.contains_key(&original_child.data) {
+                        new_dag.add_edge(data.clone(), original_child.data.clone());
+                    }
+                }
+            }
+        }
+
+        new_dag
+    }
+
+    pub fn find_predecessors(&self, start_data: &str) -> Vec<Node> {
+        let mut predecessors = Vec::new();
+
+        for node in self.nodes.values() {
+            for child in &node.children {
+                if child.data == start_data {
+                    predecessors.push(node.clone());
+                    break;
+                }
+            }
+        }
+
+        predecessors
+    }
+
+    pub fn traverse_graph_from_start(&self, start_data: &str) -> Vec<Node> {
+        let mut visited = std::collections::HashSet::new();
+        let mut result = Vec::new();
+
+        self.dfs(start_data, &mut visited, &mut result);
+
+        for (data, _) in self.nodes.iter() {
+            if !visited.contains(data) {
+                self.dfs(data, &mut visited, &mut result);
+            }
+        }
+
+        result
+    }
+
+    fn dfs(
+        &self,
+        node_data: &str,
+        visited: &mut std::collections::HashSet<String>,
+        result: &mut Vec<Node>,
     ) {
-        if visited.insert(node) {
-            result.push(node);
-            // Traverse successors
-            for neighbor in graph.neighbors(node) {
-                dfs_recursive(neighbor, graph, visited, result);
-            }
-            // Traverse predecessors
-            for neighbor in graph.neighbors_directed(node, Direction::Incoming) {
-                dfs_recursive(neighbor, graph, visited, result);
+        if visited.insert(node_data.to_string()) {
+            if let Some(node) = self.nodes.get(node_data) {
+                result.push(node.clone());
+
+                for pred in self.find_predecessors(node_data) {
+                    self.dfs(&pred.data, visited, result);
+                }
             }
         }
     }
-
-    // Start DFS from the given start node
-    dfs_recursive(start_node, graph, &mut visited, &mut result);
-
-    // Ensure all nodes are visited by initiating DFS for unvisited nodes
-    for node in graph.node_identifiers() {
-        if !visited.contains(&node) {
-            dfs_recursive(node, graph, &mut visited, &mut result);
-        }
-    }
-
-    result
 }

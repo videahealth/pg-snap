@@ -1,19 +1,12 @@
+use super::dag::{Node, DAG};
 use crate::db::consts::SQL_TYPE_MAPPING;
 use crate::db::table::{ForeignKeyInfo, Table};
 use crate::db::Db;
 use crate::db_walk::copy_data;
 use crate::utils::csv::read_csv_column_by_name;
 use anyhow::{anyhow, Result};
-use petgraph::dot::{Config, Dot};
-use petgraph::graph::{DiGraph, NodeIndex};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
-
-use super::dag::{
-    find_children, find_closed_system_full_dag, find_predecessors, get_node_index_from_data,
-    traverse_graph_from_start,
-};
-use super::dag_custom::{Node, DAG};
 
 #[derive(PartialEq, Debug)]
 enum VisitMode {
@@ -25,12 +18,10 @@ pub fn build_relations(relations: Vec<ForeignKeyInfo>) -> DAG {
     let mut dag = DAG::new();
 
     for rel in relations {
-        let node1_data = rel.source_table_id;
-        let node2_data = rel.foreign_table_id;
+        dag.create_or_get_node(rel.source_table_id.clone());
+        dag.create_or_get_node(rel.foreign_table_id.clone());
 
-        // The Rust implementation directly uses the data to add edges.
-        // Node creation or retrieval is implicitly handled within `add_edge`.
-        dag.add_edge(node1_data.clone(), node2_data);
+        dag.add_edge(rel.source_table_id, rel.foreign_table_id);
     }
 
     dag
@@ -58,12 +49,13 @@ impl Subset {
         max_rows_per_table: Option<i32>,
         subset_query_where: String,
     ) -> Self {
-        let dag = build_relations(relations);
+        let dag = build_relations(relations.clone());
         let start_table_id = format!("\"{}\".\"{}\"", start_table_schema, start_table_name);
         let subset_query = format!(
             "SELECT * FROM {} WHERE {}",
             start_table_id, subset_query_where
         );
+
         Subset {
             relations,
             tables,
@@ -128,8 +120,6 @@ impl Subset {
             .find(|t| t.id == foreign_table_id)
             .ok_or(anyhow!("Error finding tabe"))?;
 
-        println!("build_successor_query: {}", main_table_id);
-
         let fks = get_table_fk(foreign_table_id, main_table_id, &self.relations);
         let foreign_table_csv_pathbuf = foreign_table.get_data_dir(&self.root_folder)?;
 
@@ -158,8 +148,6 @@ impl Subset {
             .find(|t| t.id == foreign_table_id)
             .ok_or(anyhow!("Error finding tabe"))?;
 
-        println!("build_predecessor_query: {}", main_table_id);
-
         let fks = get_table_fk(main_table_id, foreign_table_id, &self.relations);
         let foreign_table_csv_pathbuf = foreign_table.get_data_dir(&self.root_folder)?;
 
@@ -183,6 +171,7 @@ impl Subset {
         visit_mode: VisitMode,
         visited_map: &mut HashSet<String>,
         copied_map: &mut HashSet<String>,
+        new_dag: &DAG,
     ) -> Result<()> {
         let visiting_table_id = &node.data;
         let visiting_table = self
@@ -213,14 +202,12 @@ impl Subset {
 
         let mut conditions: Vec<String> = Vec::new();
         let query_nodes = match visit_mode {
-            VisitMode::Predecessor => find_predecessors(&self.dag, *node),
-            VisitMode::Successor => node.children,
+            VisitMode::Predecessor => new_dag.find_predecessors(&visiting_table_id),
+            VisitMode::Successor => node.children.clone(),
         };
 
-        println!("Visiting: {}", visiting_table_id);
-
         for query_node in query_nodes {
-            let table_id: &String = &self.dag[query_node.to_owned()];
+            let table_id: &String = &query_node.data;
             let visited = visited_map.contains(table_id);
             let copied_data = copied_map.contains(table_id);
 
@@ -277,8 +264,6 @@ impl Subset {
         let mut copied_data: HashSet<String> = HashSet::new();
         let mut visited_data: HashSet<String> = HashSet::new();
 
-        let start_node = self.dag.find_node_by_data(&self.start_table_id);
-
         let new_dag = self.dag.find_closed_system_full_dag(&self.start_table_id);
         let nodes = new_dag.traverse_graph_from_start(&self.start_table_id);
 
@@ -291,22 +276,25 @@ impl Subset {
                 break;
             }
 
-            for node in nodes {
-                let table_id = node.data;
+            for node in &nodes {
+                let table_id = &node.data;
+                let node = node.clone();
 
-                if !copied_data.contains(&table_id) {
+                if !copied_data.contains(table_id) {
                     self.visit_node(
-                        node,
+                        &node,
                         VisitMode::Predecessor,
                         &mut visited_data,
                         &mut copied_data,
+                        &new_dag,
                     )
                     .await?;
                     self.visit_node(
-                        node,
+                        &node,
                         VisitMode::Successor,
                         &mut visited_data,
                         &mut copied_data,
+                        &new_dag,
                     )
                     .await?;
                 }
@@ -369,29 +357,6 @@ pub fn get_table_fk(
         })
         .cloned()
         .collect()
-}
-
-fn build_relations(relations: &Vec<ForeignKeyInfo>) -> DiGraph<String, ()> {
-    let mut dag = DiGraph::new();
-    let mut nodes = HashMap::new();
-
-    for rel in relations {
-        let node1_key = &rel.source_table_id;
-        let node2_key = &rel.foreign_table_id;
-
-        let node1_index = *nodes
-            .entry(node1_key.clone())
-            .or_insert_with(|| dag.add_node(node1_key.clone()));
-        let node2_index = *nodes
-            .entry(node2_key.clone())
-            .or_insert_with(|| dag.add_node(node2_key.clone()));
-
-        if dag.find_edge(node1_index, node2_index).is_none() {
-            dag.add_edge(node1_index, node2_index, ());
-        }
-    }
-
-    dag
 }
 
 #[cfg(test)]
