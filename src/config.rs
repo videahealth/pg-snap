@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
-    pub subset: SubsetConfig,
+    pub subset: Option<SubsetConfig>,
     pub skip_tables: Vec<String>,
 }
 
@@ -16,6 +16,7 @@ pub struct SubsetConfig {
     pub schema: String,
     pub where_clause: String,
     pub max_rows_per_table: Option<i32>,
+    pub cycles: Option<usize>,
 }
 
 pub fn load_config(path: &PathBuf) -> Result<Config> {

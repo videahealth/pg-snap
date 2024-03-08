@@ -7,3 +7,5 @@ fake-data
 data-dump
 data
 .DS_Store
+.snaplet
+snaplet.config.ts

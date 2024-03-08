@@ -52,6 +52,7 @@ impl DbWalk {
         let subset_config = self.subset_config.clone();
         match subset_config {
             Some(cfg) => {
+                let cycles = cfg.cycles.unwrap_or(1);
                 let subset = Subset::new(
                     self.tables.clone(),
                     self.relations.clone(),
@@ -61,6 +62,7 @@ impl DbWalk {
                     self.root_folder.clone(),
                     cfg.max_rows_per_table,
                     cfg.where_clause,
+                    cycles,
                 );
                 subset.traverse_and_copy_data().await?;
                 Ok(())
@@ -99,7 +101,12 @@ impl DbWalk {
     }
 }
 
-pub async fn copy_data(db: Db, root_dir: PathBuf, table: Table, query: Option<&str>) -> Result<()> {
+pub async fn copy_data(
+    db: Db,
+    root_dir: PathBuf,
+    table: Table,
+    query: Option<&str>,
+) -> Result<u64> {
     let data_dir = table.get_data_dir(&root_dir)?;
     let num_rows = db.copy_out(&data_dir, table.id.as_str(), query).await?;
     info!(
@@ -108,5 +115,5 @@ pub async fn copy_data(db: Db, root_dir: PathBuf, table: Table, query: Option<&s
         table.details.display.yellow()
     );
     table.save_to_file(&root_dir).await?;
-    Ok(())
+    Ok(num_rows)
 }

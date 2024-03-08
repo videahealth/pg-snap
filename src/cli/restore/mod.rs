@@ -20,6 +20,7 @@ pub struct RestoreCmd {
     pub concurrency: Option<usize>,
     pub db: DbParams,
     pub file: String,
+    pub skip_confirmation: bool,
 }
 
 impl RestoreCmd {
@@ -27,6 +28,7 @@ impl RestoreCmd {
         Self {
             concurrency: args.common.concurrency,
             file: args.dump_path,
+            skip_confirmation: args.yes,
             db: DbParams {
                 db: args.db.db,
                 host: args.db.host,
@@ -71,7 +73,9 @@ impl Command for RestoreCmd {
             self.db.db
         );
 
-        ask_for_confirmation(&conf_string);
+        if !self.skip_confirmation {
+            ask_for_confirmation(&conf_string);
+        }
 
         new_db.recreate_database().await?;
 
@@ -135,11 +139,11 @@ impl Command for RestoreCmd {
             }
         }
 
-        fs::remove_dir_all(local.root_path)?;
-
         pg_command
             .restore(fk_path_str)
             .context("Error running psql command")?;
+
+        fs::remove_dir_all(local.root_path)?;
 
         match new_db.write_table_sequences().await {
             Err(e) => {

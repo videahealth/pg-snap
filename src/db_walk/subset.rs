@@ -5,6 +5,7 @@ use crate::db::Db;
 use crate::db_walk::copy_data;
 use crate::utils::csv::read_csv_column_by_name;
 use anyhow::{anyhow, Result};
+use colored::Colorize;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -36,6 +37,7 @@ pub struct Subset {
     root_folder: PathBuf,
     max_rows_per_table: Option<i32>,
     db: Db,
+    cycles: usize,
 }
 
 impl Subset {
@@ -48,6 +50,7 @@ impl Subset {
         root_folder: PathBuf,
         max_rows_per_table: Option<i32>,
         subset_query_where: String,
+        cycles: usize,
     ) -> Self {
         let dag = build_relations(relations.clone());
         let start_table_id = format!("\"{}\".\"{}\"", start_table_schema, start_table_name);
@@ -65,6 +68,7 @@ impl Subset {
             dag,
             root_folder,
             max_rows_per_table,
+            cycles,
         }
     }
 
@@ -190,13 +194,19 @@ impl Subset {
         }
 
         if is_root_node {
-            copy_data(
+            let rows = copy_data(
                 self.db.clone(),
                 self.root_folder.clone(),
                 visiting_table.clone(),
                 Some(&self.subset_query),
             )
             .await?;
+            if rows == 0 {
+                return Err(anyhow!(
+                    "Given subset query {} has no data",
+                    self.subset_query.yellow()
+                ));
+            }
             copied_map.insert(visiting_table_id.clone());
         }
 
@@ -267,12 +277,10 @@ impl Subset {
         let new_dag = self.dag.find_closed_system_full_dag(&self.start_table_id);
         let nodes = new_dag.traverse_graph_from_start(&self.start_table_id);
 
-        let total = nodes.len();
-
         loop {
             let total_copied = &copied_data.len();
 
-            if total_copied >= &total {
+            if *total_copied >= self.cycles {
                 break;
             }
 

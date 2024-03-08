@@ -1,4 +1,4 @@
-use std::io;
+use std::{collections::HashSet, io};
 
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
@@ -31,4 +31,17 @@ pub fn rnd_string() -> String {
         .take(10)
         .map(|x| x as char)
         .collect()
+}
+
+pub fn should_skip(table_schema: &str, table_name: &str, skip_tables: &HashSet<String>) -> bool {
+    let full_name = format!("{}.{}", table_schema, table_name);
+    let schema_wildcard = format!("{}.*", table_schema);
+    let table_prefix = format!("{}.", table_schema);
+
+    skip_tables.contains(&full_name)
+        || skip_tables.contains(&schema_wildcard)
+        || skip_tables.iter().any(|s| {
+            s.starts_with(&table_prefix)
+                && table_name.starts_with(&s[table_prefix.len()..s.len() - 1])
+        })
 }

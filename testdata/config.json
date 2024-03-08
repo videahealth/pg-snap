@@ -1,0 +1,10 @@
+{
+    "skip_tables": [
+        "public.payment_p*"
+    ],
+    "subset": {
+        "table": "rental",
+        "schema": "public",
+        "where_clause": "rental_id = 2"
+    }
+}

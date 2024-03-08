@@ -18,6 +18,9 @@ pub struct Restore {
         help = "Path to a zip archive or folder containing the database dump."
     )]
     pub dump_path: String,
+
+    #[clap(long, short, action)]
+    pub yes: bool,
 }
 
 /// Connects to a database and captures its current state as a snapshot.

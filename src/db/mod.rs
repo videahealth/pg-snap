@@ -4,12 +4,14 @@ use self::table::Table;
 use crate::cli::DbParams;
 use crate::utils::csv::read_first_line;
 use crate::utils::rnd_string;
+use crate::utils::should_skip;
 use bytes::Bytes;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::ConnectOptions;
 use sqlx::PgConnection;
 use sqlx::Pool;
 use sqlx::Postgres;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -278,9 +280,9 @@ pub struct DumpParser<'a> {
 }
 
 impl<'a> DumpParser<'a> {
-    pub fn parse_from(path: &PathBuf) -> Result<DumpParser> {
+    pub fn parse_from(path: &PathBuf, skip_tables: HashSet<String>) -> Result<DumpParser> {
         let dump_content = parse_dump_file(path)?;
-        let (tables, relations) = get_tables_and_foreign_keys(dump_content.as_str())?;
+        let (tables, relations) = get_tables_and_foreign_keys(dump_content.as_str(), &skip_tables)?;
 
         Ok(DumpParser {
             relations,
@@ -347,6 +349,7 @@ pub fn extract_and_remove_fk_constraints(input: String) -> std::io::Result<(Stri
 
 pub fn get_tables_and_foreign_keys(
     dump_content: &str,
+    skip_tables: &HashSet<String>,
 ) -> Result<(Vec<Table>, Vec<ForeignKeyInfo>)> {
     let result = pg_query::parse(dump_content)?;
 
@@ -361,6 +364,11 @@ pub fn get_tables_and_foreign_keys(
             if let Some(relation) = &v.relation {
                 let schema = &relation.schemaname;
                 let table_name = &relation.relname;
+
+                if should_skip(schema, table_name, skip_tables) {
+                    continue;
+                }
+
                 let cols = &v.table_elts;
 
                 let table_cols: Vec<Col> = cols
@@ -408,7 +416,11 @@ pub fn get_tables_and_foreign_keys(
         let alter_statement = statement.stmt.clone();
         if let Some(pg_query::NodeEnum::AlterTableStmt(v)) = &alter_statement.and_then(|s| s.node) {
             let pk_table = v.relation.clone().unwrap().relname;
-            let pk_schema = v.relation.as_ref().unwrap().schemaname.clone(); // Assuming schema name is Clone
+            let pk_schema = v.relation.as_ref().unwrap().schemaname.clone();
+
+            if should_skip(&pk_schema, &pk_table, skip_tables) {
+                continue;
+            }
 
             for al in &v.cmds {
                 let nd = al.node.as_ref().ok_or(anyhow!("Missing node in command"))?;
@@ -423,6 +435,10 @@ pub fn get_tables_and_foreign_keys(
                                 let fk_table_val = &cons.pktable.as_ref().unwrap();
                                 let fk_table = &fk_table_val.relname;
                                 let fk_schema = &fk_table_val.schemaname;
+
+                                if should_skip(&fk_schema, &fk_table, skip_tables) {
+                                    continue;
+                                }
 
                                 for (fk_attr, pk_attr) in fk_attrs.iter().zip(pk_attrs.iter()) {
                                     let fk_attr_node = fk_attr.node.as_ref().unwrap();
@@ -443,13 +459,19 @@ pub fn get_tables_and_foreign_keys(
                                                 &tables,
                                                 &fk_col_name.sval,
                                             )
-                                            .expect("Error getting col type for foreign table");
+                                            .expect(&format!(
+                                                "Error getting col type for foreign table: {}",
+                                                fk_schema_table
+                                            ));
                                             let col_type = get_table_type(
                                                 &pk_schema_table,
                                                 &tables,
                                                 &col_name.sval,
                                             )
-                                            .expect("Error getting col type for table");
+                                            .expect(&format!(
+                                                "Error getting col type for table: {}",
+                                                pk_schema_table
+                                            ));
 
                                             let new_fk_rel = ForeignKeyInfo::new(
                                                 pk_schema.to_string(),
@@ -559,6 +581,7 @@ CREATE INDEX not_fk_example ON public.example USING btree (column);";
 
     #[test]
     fn it_should_extract_tables_and_foreign_keys() -> Result<()> {
+        let hs: HashSet<String> = HashSet::new();
         let (tables, fks) = get_tables_and_foreign_keys(
             r"
         CREATE TABLE public.data_src (
@@ -580,6 +603,7 @@ CREATE INDEX not_fk_example ON public.example USING btree (column);";
         ALTER TABLE ONLY public.datsrcln
         ADD CONSTRAINT datsrcln_datasrc_id_fkey FOREIGN KEY (datasrc_id) REFERENCES public.data_src(datasrc_id);                      
         ",
+            &hs,
         )?;
         assert_eq!(tables.len(), 2);
         assert_eq!(fks.len(), 1);

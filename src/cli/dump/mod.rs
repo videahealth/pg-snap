@@ -6,7 +6,7 @@ use crate::{
     pg_command::PgCommand,
 };
 use log::info;
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use super::{Command, DbParams, Dump};
 use anyhow::{Context, Result};
@@ -70,18 +70,27 @@ impl Command for DumpCmd {
             .await
             .context("Error initializing db")?;
 
-        let dump_parser = DumpParser::parse_from(&dump_file).context("Error parsing dump file")?;
+        let (skip_tables, subset_config) = match config {
+            Some(c) => {
+                let st = HashSet::from_iter(c.skip_tables.into_iter());
+                let sscfg = match c.subset {
+                    Some(sc) => Some(sc),
+                    None => None,
+                };
+
+                (st, sscfg)
+            }
+            None => (HashSet::new(), None),
+        };
+
+        let dump_parser =
+            DumpParser::parse_from(&dump_file, skip_tables).context("Error parsing dump file")?;
         let tables = dump_parser.tables.clone();
         let relations = dump_parser.relations.clone();
 
         dump_parser
             .split_fk_constraints(root_dir)
             .context("Error parsing dump file fk contraints")?;
-
-        let subset_config = match config {
-            Some(c) => Some(c.subset),
-            None => None,
-        };
 
         let db_walk = DbWalk::new(
             new_db,
