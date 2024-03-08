@@ -114,7 +114,7 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
       - run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends postgresql-client-15
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client-15
       - name: Run Tests
         run: cargo test integration -- --color always
