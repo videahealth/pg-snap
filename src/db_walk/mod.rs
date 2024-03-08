@@ -109,6 +109,7 @@ impl DbWalk {
                             int
                         );
                     }
+
                     let tables_to_copy: Vec<_> = self
                         .tables
                         .clone()
