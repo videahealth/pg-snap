@@ -139,6 +139,7 @@ impl Command for RestoreCmd {
             }
         }
 
+        info!("Applying database foreign keys");
         pg_command
             .restore(fk_path_str)
             .context("Error running psql command")?;

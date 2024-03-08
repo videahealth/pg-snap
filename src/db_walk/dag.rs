@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::hash::Hash;
+use std::{collections::HashMap, hash::Hasher};
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -12,6 +13,20 @@ impl Node {
             data,
             children: Vec::new(),
         }
+    }
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
+impl Eq for Node {}
+
+impl Hash for Node {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.data.hash(state);
     }
 }
 

@@ -77,7 +77,6 @@ impl Command for DumpCmd {
                     Some(sc) => Some(sc),
                     None => None,
                 };
-
                 (st, sscfg)
             }
             None => (HashSet::new(), None),

@@ -270,12 +270,18 @@ impl Subset {
         Ok(())
     }
 
-    pub async fn traverse_and_copy_data(&self) -> Result<()> {
+    pub async fn traverse_and_copy_data(&self) -> Result<HashSet<String>> {
         let mut copied_data: HashSet<String> = HashSet::new();
         let mut visited_data: HashSet<String> = HashSet::new();
 
         let new_dag = self.dag.find_closed_system_full_dag(&self.start_table_id);
         let nodes = new_dag.traverse_graph_from_start(&self.start_table_id);
+
+        let subset_tables: HashSet<_> = nodes
+            .clone()
+            .into_iter()
+            .map(|v| v.data.replace("\"", ""))
+            .collect();
 
         loop {
             let total_copied = &copied_data.len();
@@ -309,7 +315,7 @@ impl Subset {
             }
         }
 
-        Ok(())
+        Ok(subset_tables)
     }
 }
 

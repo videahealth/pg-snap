@@ -1,5 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -28,6 +30,20 @@ pub struct Table {
     pub sample_query: Option<String>,
     pub num_rows: Option<i64>,
     pub cols: Vec<Col>,
+}
+
+impl PartialEq for Table {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Table {}
+
+impl Hash for Table {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
 }
 
 #[derive(Debug, Clone)]

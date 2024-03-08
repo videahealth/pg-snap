@@ -16,7 +16,8 @@ pub struct SubsetConfig {
     pub schema: String,
     pub where_clause: String,
     pub max_rows_per_table: Option<i32>,
-    pub cycles: Option<usize>,
+    pub max_cycles: Option<usize>,
+    pub passthrough: Option<Vec<String>>,
 }
 
 pub fn load_config(path: &PathBuf) -> Result<Config> {
