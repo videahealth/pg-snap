@@ -270,6 +270,14 @@ impl Subset {
         Ok(())
     }
 
+    /// Performs a subset algorithm to copy Table data across a directed acyclic graph (DAG) with the following steps:
+    ///  1. Identifies a new closed system DAG starting from the `start_table_id`.
+    ///  2. Traverses the graph from the start, generating a list of nodes connected (directly or indirectly) to the `start_table_id`.
+    ///  3. Iterates over each node, visiting all its predecessors and successors to understand the graph's connectivity.
+    ///  4. Checks if a node's data has already been copied; if so, it skips to the next node to avoid duplication.
+    ///  5. If the node is the `start_table_id`, it copies its data immediately and proceeds no further with this node.
+    ///  6. For other nodes, it determines the connected nodes based on the traversal direction. If data for these connected nodes has been copied.
+    ///     it resolves the foreign key (FK) relationships. It then copies the data that connects from the current node to the nodes being visited.
     pub async fn traverse_and_copy_data(&self) -> Result<HashSet<String>> {
         let mut copied_data: HashSet<String> = HashSet::new();
         let mut visited_data: HashSet<String> = HashSet::new();

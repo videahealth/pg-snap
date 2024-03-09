@@ -126,6 +126,14 @@ impl DAG {
         predecessors
     }
 
+    /// conducts a full traversal of the DAG, starting from startNode. It first applies
+    /// depth-first search (DFS) from startNode to explore reachable nodes. Subsequently, it ensures all nodes in the
+    /// DAG, including those in disconnected components, are visited by checking and performing DFS on unvisited nodes.
+    /// This guarantees complete coverage of the graph, making it ideal for operations needing a thorough exploration
+    /// or processing of all nodes, regardless of connectivity.
+    ///
+    /// startNode: The node from which traversal begins.
+    /// Returns: NodeSlice of all visited nodes, ensuring no node is overlooked.
     pub fn traverse_graph_from_start(&self, start_data: &str) -> Vec<Node> {
         let mut visited = std::collections::HashSet::new();
         let mut result = Vec::new();
