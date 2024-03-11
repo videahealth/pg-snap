@@ -19,7 +19,12 @@ curl -sSL https://raw.githubusercontent.com/videahealth/pg-snap/main/install.sh 
 ### Dump
 
 ```bash
-pg_snap dump --username "postgres" --db "demodb" --host "localhost" --password "postgres" --config pg-snap.json --compress
+pg_snap dump --username "postgres" \
+             --db "demodb" \
+             --host "localhost" \
+             --password "postgres" \
+             --config pg-snap.json \
+             --compress
 ```
 
 * Take a full database dump skipping some tables
@@ -61,5 +66,9 @@ NOTE: If a required table is part of the subset but also in `skip_tables`, it wi
 Restore data into target db, points to file generated through `dump` command.
 
 ```bash
-pg_snap restore --username "postgres" --db "demodb2" --host "localhost" --password "postgres" -f pets.zip
+pg_snap restore --username "postgres" \
+                --db "demodb2" \
+                --host "localhost" \
+                --password "postgres" \
+                -f pets.zip
 ```
