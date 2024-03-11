@@ -1,6 +1,12 @@
 /target
+pg-snap
+data.json
+*.zip
 node_modules
 fake-data
 data-dump
 data
+.DS_Store
+.snaplet
+snaplet.config.ts
 .DS_Store
