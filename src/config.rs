@@ -21,7 +21,8 @@ pub struct SubsetConfig {
 }
 
 pub fn load_config(path: &PathBuf) -> Result<Config> {
-    let file = File::open(path).context("Error opening config file")?;
+    let file =
+        File::open(path).context(format!("opening config file: {path:?} file does not exist"))?;
     let mut bytes = Vec::new();
     let mut reader = io::BufReader::new(file);
     reader

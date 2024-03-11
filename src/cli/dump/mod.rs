@@ -51,16 +51,16 @@ impl Command for DumpCmd {
 
         let dump_file = local.get_dump_file().context("Error loading dump file")?;
 
-        info!("Introspecing db and taking snapshot");
-        pg_command
-            .dump(&dump_file)
-            .context("Error running pg_dump command")?;
-
         let config: Option<Config> = if let Some(cfg_path) = &self.config {
             Some(load_config(cfg_path)?)
         } else {
             None
         };
+
+        info!("Introspecing db and taking snapshot");
+        pg_command
+            .dump(&dump_file)
+            .context("Error running pg_dump command")?;
 
         // Initialize db connection and extract tables from dump file
         let conn = Db::connect(self.db.clone())
