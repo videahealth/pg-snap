@@ -4,9 +4,9 @@ use std::io::{Seek, Write};
 use std::iter::Iterator;
 use zip::write::FileOptions;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use std::fs::{self, File};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
 fn zip_dir<T>(
@@ -66,10 +66,11 @@ pub fn compress(src_dir: &str, dst_file: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn decompress(fname: &str) -> Result<()> {
+pub fn decompress(fname: &str) -> Result<PathBuf> {
     let file = fs::File::open(fname)?;
 
     let mut archive = zip::ZipArchive::new(file)?;
+    let mut parent: Option<PathBuf> = None;
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
@@ -80,6 +81,9 @@ pub fn decompress(fname: &str) -> Result<()> {
 
         if (*file.name()).ends_with('/') {
             fs::create_dir_all(&outpath)?;
+            let path = outpath.to_str().context("getting root path")?;
+            let split_path = path.split("/").nth(0).context("getting parent path")?;
+            parent = Some(PathBuf::from(split_path));
         } else {
             if let Some(p) = outpath.parent() {
                 if !p.exists() {
@@ -100,5 +104,7 @@ pub fn decompress(fname: &str) -> Result<()> {
         }
     }
 
-    Ok(())
+    let parent_folder = parent.context("getting parent dir")?;
+
+    Ok(parent_folder)
 }

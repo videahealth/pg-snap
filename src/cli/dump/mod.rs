@@ -102,7 +102,10 @@ impl Command for DumpCmd {
         db_walk.run().await.context("Error extracting data")?;
 
         if self.compress {
-            local.compress().context("Error compressing output")?;
+            let comp = local.compress().context("Error compressing output")?;
+            info!("Created dump output in zip file: {comp}");
+        } else {
+            info!("Created dump output in folder: {root_dir:?}");
         }
         Ok(())
     }

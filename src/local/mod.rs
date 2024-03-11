@@ -32,10 +32,10 @@ impl Local {
             return Err(anyhow!("Given file: {} does not exist", name));
         }
         if root.is_file() && root.extension().and_then(OsStr::to_str) == Some("zip") {
+            let orig_root = root.clone();
             let str_file = root.to_str().ok_or(anyhow!("Error getting zip file"))?;
-            decompress(str_file).context("")?;
-            remove_file(&root).map_err(|err| anyhow!("Failed to delete zip file: {}", err))?;
-            root = root.with_extension("");
+            root = decompress(str_file).context("decompressing file")?;
+            remove_file(&orig_root).map_err(|err| anyhow!("Failed to delete zip file: {}", err))?;
         }
 
         let root_path = if root.is_dir() {
@@ -90,7 +90,7 @@ impl Local {
         Ok(tables)
     }
 
-    pub fn compress(&self) -> Result<()> {
+    pub fn compress(&self) -> Result<String> {
         let comp_dir = self
             .root_path
             .to_str()
@@ -101,6 +101,6 @@ impl Local {
             .ok_or(anyhow!("Error getting output dir"))?;
         compress(comp_dir, root)?;
         fs::remove_dir_all(&self.root_path)?;
-        Ok(())
+        Ok(comp_dir.to_string())
     }
 }
