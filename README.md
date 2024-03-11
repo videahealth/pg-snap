@@ -63,7 +63,7 @@ NOTE: If a required table is part of the subset but also in `skip_tables`, it wi
 
 ### Restore
 
-Restore data into target db, points to file generated through `dump` command.
+Restore data into target db. The flag `-f` points to file generated through `dump` command.
 
 ```bash
 pg_snap restore --username "postgres" \
