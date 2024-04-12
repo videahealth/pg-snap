@@ -32,6 +32,7 @@ jobs:
         build:
           - macos-aarch64
           - macos-x64
+          - linux-x64
         include:
           - build: macos-aarch64
             os: macos-latest
@@ -39,7 +40,9 @@ jobs:
           - build: macos-x64
             os: macos-latest
             target: x86_64-apple-darwin
-
+          - build: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
