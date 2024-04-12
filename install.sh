@@ -10,12 +10,16 @@ TAG_NAME=$(echo "$LATEST_RELEASE" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
 
 ARCH=$(uname -m)
 
-if [ "$ARCH" = "arm64" ]; then
+# Determine the correct binary tar based on architecture and OS
+OS=$(uname -s)
+if [ "$OS" = "Darwin" ] && [ "$ARCH" = "arm64" ]; then
     BINARY_TAR="pg-snap-$TAG_NAME-aarch64-apple-darwin.tar.gz"
-elif [ "$ARCH" = "x86_64" ]; then
+elif [ "$OS" = "Darwin" ] && [ "$ARCH" = "x86_64" ]; then
     BINARY_TAR="pg-snap-$TAG_NAME-x86_64-apple-darwin.tar.gz"
+elif [ "$OS" = "Linux" ] && [ "$ARCH" = "x86_64" ]; then
+    BINARY_TAR="pg-snap-$TAG_NAME-x86_64-unknown-linux-gnu.tar.gz"
 else
-    echo "Unsupported architecture: $ARCH"
+    echo "Unsupported OS/Architecture combination: $OS/$ARCH"
     exit 1
 fi
 
