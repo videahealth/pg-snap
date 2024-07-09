@@ -280,9 +280,14 @@ pub struct DumpParser<'a> {
 }
 
 impl<'a> DumpParser<'a> {
-    pub fn parse_from(path: &PathBuf, skip_tables: HashSet<String>) -> Result<DumpParser> {
+    pub fn parse_from(
+        path: &PathBuf,
+        skip_tables: HashSet<String>,
+        skip_schemas: HashSet<String>,
+    ) -> Result<DumpParser> {
         let dump_content = parse_dump_file(path)?;
-        let (tables, relations) = get_tables_and_foreign_keys(dump_content.as_str(), &skip_tables)?;
+        let (tables, relations) =
+            get_tables_and_foreign_keys(dump_content.as_str(), &skip_tables, &skip_schemas)?;
 
         Ok(DumpParser {
             relations,
@@ -350,6 +355,7 @@ pub fn extract_and_remove_fk_constraints(input: String) -> std::io::Result<(Stri
 pub fn get_tables_and_foreign_keys(
     dump_content: &str,
     skip_tables: &HashSet<String>,
+    skip_schemas: &HashSet<String>,
 ) -> Result<(Vec<Table>, Vec<ForeignKeyInfo>)> {
     let result = pg_query::parse(dump_content)?;
 
@@ -365,7 +371,7 @@ pub fn get_tables_and_foreign_keys(
                 let schema = &relation.schemaname;
                 let table_name = &relation.relname;
 
-                if should_skip(schema, table_name, skip_tables) {
+                if should_skip(schema, table_name, skip_tables, skip_schemas) {
                     continue;
                 }
 
@@ -418,7 +424,7 @@ pub fn get_tables_and_foreign_keys(
             let pk_table = v.relation.clone().unwrap().relname;
             let pk_schema = v.relation.as_ref().unwrap().schemaname.clone();
 
-            if should_skip(&pk_schema, &pk_table, skip_tables) {
+            if should_skip(&pk_schema, &pk_table, skip_tables, skip_schemas) {
                 continue;
             }
 
@@ -436,7 +442,7 @@ pub fn get_tables_and_foreign_keys(
                                 let fk_table = &fk_table_val.relname;
                                 let fk_schema = &fk_table_val.schemaname;
 
-                                if should_skip(&fk_schema, &fk_table, skip_tables) {
+                                if should_skip(&fk_schema, &fk_table, skip_tables, skip_schemas) {
                                     continue;
                                 }
 
@@ -581,7 +587,8 @@ CREATE INDEX not_fk_example ON public.example USING btree (column);";
 
     #[test]
     fn it_should_extract_tables_and_foreign_keys() -> Result<()> {
-        let hs: HashSet<String> = HashSet::new();
+        let st: HashSet<String> = HashSet::new();
+        let ss: HashSet<String> = HashSet::new();
         let (tables, fks) = get_tables_and_foreign_keys(
             r"
         CREATE TABLE public.data_src (
@@ -603,7 +610,8 @@ CREATE INDEX not_fk_example ON public.example USING btree (column);";
         ALTER TABLE ONLY public.datsrcln
         ADD CONSTRAINT datsrcln_datasrc_id_fkey FOREIGN KEY (datasrc_id) REFERENCES public.data_src(datasrc_id);                      
         ",
-            &hs,
+            &st,
+            &ss,
         )?;
         assert_eq!(tables.len(), 2);
         assert_eq!(fks.len(), 1);

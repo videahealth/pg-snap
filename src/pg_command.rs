@@ -1,4 +1,4 @@
-use std::{fs, io::ErrorKind, path::PathBuf, process::Command};
+use std::{collections::HashSet, fs, io::ErrorKind, path::PathBuf, process::Command};
 
 use crate::cli::DbParams;
 use anyhow::{Context, Result};
@@ -26,12 +26,34 @@ impl<'a> PgCommand<'a> {
         Self { params }
     }
 
-    pub fn dump(&self, path: &PathBuf) -> Result<()> {
+    pub fn dump(
+        &self,
+        path: &PathBuf,
+        skip_tables: HashSet<String>,
+        skip_schemas: HashSet<String>,
+    ) -> Result<()> {
         let mut dump_flags = self.get_dump_command_flags();
         let pw = self.params.password.clone();
         dump_flags.push("--schema-only".to_owned());
 
+        let skip_tbls: Vec<_> = skip_tables.into_iter().collect();
+
+        let skip_scmas: Vec<_> = skip_schemas.into_iter().collect();
+
+        if !skip_tbls.is_empty() {
+            for tbl in skip_tbls {
+                dump_flags.push(format!("--exclude-table={}", tbl));
+            }
+        }
+
+        if !skip_scmas.is_empty() {
+            for sch in skip_scmas {
+                dump_flags.push(format!("--exclude-schema={}{}{}", '"', sch, '"'));
+            }
+        }
+
         let mut cmd = Command::new(PgCommandStr::PgDump.as_str());
+
         let output = cmd.args(&dump_flags).env("PGPASSWORD", pw);
 
         let result = execute_command(PgCommandStr::PgDump, output)?;

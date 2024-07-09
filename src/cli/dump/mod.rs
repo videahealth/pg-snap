@@ -57,9 +57,22 @@ impl Command for DumpCmd {
             None
         };
 
+        let (skip_tables, skip_schemas, subset_config) = match config {
+            Some(c) => {
+                let st: HashSet<String> = HashSet::from_iter(c.skip_tables.into_iter());
+                let ss: HashSet<String> = HashSet::from_iter(c.skip_schemas.into_iter());
+                let sscfg = match c.subset {
+                    Some(sc) => Some(sc),
+                    None => None,
+                };
+                (st, ss, sscfg)
+            }
+            None => (HashSet::new(), HashSet::new(), None),
+        };
+
         info!("Introspecing db and taking snapshot");
         pg_command
-            .dump(&dump_file)
+            .dump(&dump_file, skip_tables.clone(), skip_schemas.clone())
             .context("Error running pg_dump command")?;
 
         // Initialize db connection and extract tables from dump file
@@ -70,20 +83,8 @@ impl Command for DumpCmd {
             .await
             .context("Error initializing db")?;
 
-        let (skip_tables, subset_config) = match config {
-            Some(c) => {
-                let st = HashSet::from_iter(c.skip_tables.into_iter());
-                let sscfg = match c.subset {
-                    Some(sc) => Some(sc),
-                    None => None,
-                };
-                (st, sscfg)
-            }
-            None => (HashSet::new(), None),
-        };
-
-        let dump_parser =
-            DumpParser::parse_from(&dump_file, skip_tables).context("Error parsing dump file")?;
+        let dump_parser = DumpParser::parse_from(&dump_file, skip_tables, skip_schemas)
+            .context("Error parsing dump file")?;
         let tables = dump_parser.tables.clone();
         let relations = dump_parser.relations.clone();
 

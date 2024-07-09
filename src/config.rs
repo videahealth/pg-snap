@@ -8,6 +8,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub subset: Option<SubsetConfig>,
     pub skip_tables: Vec<String>,
+    pub skip_schemas: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
