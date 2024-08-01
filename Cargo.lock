@@ -1375,7 +1375,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha256",
- "shlex",
  "sqlx",
  "testcontainers-modules",
  "tokio",
