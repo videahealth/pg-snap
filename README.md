@@ -32,11 +32,19 @@ pg_snap dump --username "postgres" \
 // pg-snap.json
 {
     "skip_tables": [
-        "test.*",
-        "public.Cats",
-        "public.Event*"
+        {
+            "name": "test.*"
+        },
+         {
+            "name": "public.Cats"
+        },
+        {
+            "name": "public.Event*"
+        }
     ]
 }
+
+Additionally add `keep_ddl = true` to only skip data.
 ```
 
 * Take a dump of a subset of data
@@ -44,9 +52,15 @@ pg_snap dump --username "postgres" \
 // pg-snap.json
 {
     "skip_tables": [
-        "test.*",
-        "public.Cats",
-        "public.Event*"
+        {
+            "name": "test.*"
+        },
+         {
+            "name": "public.Cats"
+        },
+        {
+            "name": "public.Event*"
+        }
     ],
     "subset": {
         "table": "PetOwners",

@@ -4,11 +4,18 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::PathBuf;
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SkipConfig {
+    pub name: String,
+    pub keep_ddl: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     pub subset: Option<SubsetConfig>,
-    pub skip_tables: Vec<String>,
-    pub skip_schemas: Vec<String>,
+    pub skip_tables: Vec<SkipConfig>,
+    pub skip_schemas: Vec<SkipConfig>,
+    pub keep_ddl: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

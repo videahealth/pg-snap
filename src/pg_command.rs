@@ -31,6 +31,8 @@ impl<'a> PgCommand<'a> {
         path: &PathBuf,
         skip_tables: HashSet<String>,
         skip_schemas: HashSet<String>,
+        keep_ddl_tables: HashSet<String>,
+        keep_ddl_schemas: HashSet<String>,
     ) -> Result<()> {
         let mut dump_flags = self.get_dump_command_flags();
         let pw = self.params.password.clone();
@@ -42,13 +44,17 @@ impl<'a> PgCommand<'a> {
 
         if !skip_tbls.is_empty() {
             for tbl in skip_tbls {
-                dump_flags.push(format!("--exclude-table={}", tbl));
+                if !keep_ddl_tables.contains(&tbl) {
+                    dump_flags.push(format!("--exclude-table={}", tbl));
+                }
             }
         }
 
         if !skip_scmas.is_empty() {
             for sch in skip_scmas {
-                dump_flags.push(format!("--exclude-schema={}{}{}", '"', sch, '"'));
+                if !keep_ddl_schemas.contains(&sch) {
+                    dump_flags.push(format!("--exclude-schema={}{}{}", '"', sch, '"'));
+                }
             }
         }
 

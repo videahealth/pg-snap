@@ -44,8 +44,11 @@ pub fn should_skip(
 
     // Check skip_tables
     for pattern in skip_tables {
+        let cleaned_string = pattern.replace('"', "");
+
         // Convert pattern to regex, adding ^ at the start and $ at the end for exact matches
-        let regex_pattern = format!("^{}$", regex::escape(pattern).replace("\\*", ".*"));
+        let regex_pattern = format!("^{}$", regex::escape(&cleaned_string).replace("\\*", ".*"));
+
         let re = Regex::new(&regex_pattern).expect("Invalid regex pattern in skip_tables");
 
         if re.is_match(&full_table_name) || re.is_match(&table_name) {
@@ -55,8 +58,10 @@ pub fn should_skip(
 
     // Check skip_schemas
     for pattern in skip_schemas {
+        let cleaned_string = pattern.replace(r#"\""#, "");
+
         // Convert pattern to regex, adding ^ at the start and $ at the end for exact matches
-        let regex_pattern = format!("^{}$", regex::escape(pattern).replace("\\*", ".*"));
+        let regex_pattern = format!("^{}$", regex::escape(&cleaned_string).replace("\\*", ".*"));
         let re = Regex::new(&regex_pattern).expect("Invalid regex pattern in skip_schemas");
 
         if re.is_match(table_schema) {
@@ -80,6 +85,12 @@ mod tests {
         skip_tables.insert("public.Temp*".to_string());
         skip_tables.insert("myschema.MyTable".to_string());
         skip_schemas.insert("someschema".to_string());
+        skip_tables.insert("public.\"Events\"*".to_string());
+
+        assert_eq!(
+            should_skip("public", "Events", &skip_tables, &skip_schemas),
+            true
+        );
 
         assert_eq!(
             should_skip("public", "TempTable", &skip_tables, &skip_schemas),

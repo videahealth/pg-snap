@@ -63,7 +63,10 @@ impl DbWalk {
             let table = table.clone();
 
             let handle = task::spawn(async move {
-                copy_data(new_db, folder, table, None).await.unwrap();
+                match copy_data(new_db, folder, table.clone(), None).await {
+                    Err(e) => warn!("Error copying table {}: {e}", table.id),
+                    Ok(v) => {}
+                }
                 Ok::<(), Box<dyn std::error::Error + Send>>(())
             });
 
