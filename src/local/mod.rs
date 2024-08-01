@@ -6,10 +6,11 @@ use std::{
 
 use crate::db::table::Table;
 use anyhow::{anyhow, Context, Result};
+use log::info;
 
-use self::zip::{compress, decompress};
+use self::zip_dir::{unzip_directory, zip_directory};
 
-mod zip;
+mod zip_dir;
 
 pub struct Local {
     pub root_path: PathBuf,
@@ -32,9 +33,17 @@ impl Local {
             return Err(anyhow!("Given file: {} does not exist", name));
         }
         if root.is_file() && root.extension().and_then(OsStr::to_str) == Some("zip") {
+            info!("Decompressing file...");
+
             let orig_root = root.clone();
-            let str_file = root.to_str().ok_or(anyhow!("Error getting zip file"))?;
-            root = decompress(str_file).context("decompressing file")?;
+
+            let dest_dir = PathBuf::from(".");
+
+            let new_path =
+                unzip_directory(root.clone(), dest_dir).context("Error unzipping dir")?;
+
+            root = PathBuf::from(new_path);
+
             remove_file(&orig_root).map_err(|err| anyhow!("Failed to delete zip file: {}", err))?;
         }
 
@@ -99,7 +108,7 @@ impl Local {
         let root = root_path
             .to_str()
             .ok_or(anyhow!("Error getting output dir"))?;
-        compress(comp_dir, root)?;
+        zip_directory(comp_dir, root, 4)?;
         fs::remove_dir_all(&self.root_path)?;
         Ok(comp_dir.to_string())
     }
