@@ -57,9 +57,59 @@ impl Command for DumpCmd {
             None
         };
 
+        let (skip_tables, skip_schemas, keep_ddl_tables, keep_ddl_schemas, subset_config) =
+            match config {
+                Some(c) => {
+                    let skip_tables_names: Vec<String> =
+                        c.skip_tables.clone().into_iter().map(|v| v.name).collect();
+                    let skip_schemas_names: Vec<String> =
+                        c.skip_schemas.clone().into_iter().map(|v| v.name).collect();
+
+                    let keep_ddl_tables: HashSet<String> = c
+                        .skip_tables
+                        .into_iter()
+                        .filter(|v| v.keep_ddl.unwrap_or(false))
+                        .map(|v| v.name)
+                        .collect();
+                    let keep_ddl_schemas: HashSet<String> = c
+                        .skip_schemas
+                        .into_iter()
+                        .filter(|v| v.keep_ddl.unwrap_or(false))
+                        .map(|v| v.name)
+                        .collect();
+
+                    let st: HashSet<String> = HashSet::from_iter(skip_tables_names);
+                    let ss: HashSet<String> = HashSet::from_iter(skip_schemas_names);
+                    let sscfg = match c.subset {
+                        Some(sc) => Some(sc),
+                        None => None,
+                    };
+                    (
+                        st,
+                        ss,
+                        HashSet::from_iter(keep_ddl_tables),
+                        HashSet::from_iter(keep_ddl_schemas),
+                        sscfg,
+                    )
+                }
+                None => (
+                    HashSet::new(),
+                    HashSet::new(),
+                    HashSet::new(),
+                    HashSet::new(),
+                    None,
+                ),
+            };
+
         info!("Introspecing db and taking snapshot");
         pg_command
-            .dump(&dump_file)
+            .dump(
+                &dump_file,
+                skip_tables.clone(),
+                skip_schemas.clone(),
+                keep_ddl_tables.clone(),
+                keep_ddl_schemas.clone(),
+            )
             .context("Error running pg_dump command")?;
 
         // Initialize db connection and extract tables from dump file
@@ -70,20 +120,8 @@ impl Command for DumpCmd {
             .await
             .context("Error initializing db")?;
 
-        let (skip_tables, subset_config) = match config {
-            Some(c) => {
-                let st = HashSet::from_iter(c.skip_tables.into_iter());
-                let sscfg = match c.subset {
-                    Some(sc) => Some(sc),
-                    None => None,
-                };
-                (st, sscfg)
-            }
-            None => (HashSet::new(), None),
-        };
-
-        let dump_parser =
-            DumpParser::parse_from(&dump_file, skip_tables).context("Error parsing dump file")?;
+        let dump_parser = DumpParser::parse_from(&dump_file, skip_tables, skip_schemas)
+            .context("Error parsing dump file")?;
         let tables = dump_parser.tables.clone();
         let relations = dump_parser.relations.clone();
 

@@ -10,3 +10,4 @@ data
 .snaplet
 snaplet.config.ts
 .DS_Store
+*.ignore.*
