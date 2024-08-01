@@ -65,11 +65,6 @@ setval(col_sequence, coalesce(max_val, 1)) --<< this will change the sequence
 from maxvals;
 ";
 
-#[derive(sqlx::FromRow)]
-pub struct PgVersion {
-    pub regexp_matches: String,
-}
-
 #[derive(Clone)]
 pub struct Db {
     params: DbParams,
@@ -80,7 +75,6 @@ pub struct Db {
 pub struct DbExtensionTable {
     pub schema: String,
     pub name: String,
-    pub extension_name: String,
 }
 
 impl Db {

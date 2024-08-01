@@ -48,11 +48,7 @@ impl Hash for Table {
 
 #[derive(Debug, Clone)]
 pub struct ForeignKeyInfo {
-    pub schema: String,
-    pub name: String,
     pub column_name: String,
-    pub foreign_schema: String,
-    pub foreign_name: String,
     pub foreign_column_name: String,
     pub source_table_id: String,
     pub foreign_table_id: String,
@@ -122,11 +118,7 @@ impl ForeignKeyInfo {
         let foreign_table_id = format!("\"{}\".\"{}\"", foreign_schema, foreign_name);
 
         ForeignKeyInfo {
-            schema,
-            name,
             column_name,
-            foreign_schema,
-            foreign_name,
             foreign_column_name,
             source_table_id,
             foreign_table_id,
